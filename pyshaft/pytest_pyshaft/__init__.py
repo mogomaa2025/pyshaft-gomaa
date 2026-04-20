@@ -1,0 +1,1 @@
+"""PyShaft pytest plugin package."""

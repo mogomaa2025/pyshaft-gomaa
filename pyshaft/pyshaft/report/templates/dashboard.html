@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}PyShaft Report — Dashboard{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+
+{% block content %}
+<!-- Summary Cards -->
+<div class="summary-grid">
+    <div class="card">
+        <div class="card-header">Total Tests</div>
+        <div class="card-value">{{ report.total }}</div>
+        <div class="progress-bar mt-2">
+            <div class="progress-bar-fill" style="width: {{ report.pass_rate }}%; background: var(--success);"></div>
+        </div>
+        <div class="text-muted mt-2" style="font-size: 12px;">{{ "%.1f"|format(report.pass_rate) }}% pass rate</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Passed</div>
+        <div class="card-value text-success">{{ report.passed }}</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Failed</div>
+        <div class="card-value text-error">{{ report.failed }}</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Skipped</div>
+        <div class="card-value text-warning">{{ report.skipped }}</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Duration</div>
+        <div class="card-value">{{ "%.1f"|format(report.duration_ms / 1000) }}s</div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="filters">
+    <button class="filter-btn" data-filter="passed">✓ Passed</button>
+    <button class="filter-btn" data-filter="failed">✗ Failed</button>
+    <button class="filter-btn" data-filter="skipped">⊘ Skipped</button>
+    <input type="text" class="search-input" placeholder="🔎 Search tests...">
+</div>
+
+<!-- Test List -->
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 40px;">#</th>
+                    <th>Test Name</th>
+                    <th style="width: 100px;">Status</th>
+                    <th style="width: 100px;">Duration</th>
+                    <th style="width: 80px;">Steps</th>
+                    <th style="width: 250px;">Duration Bar</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set max_duration = report.tests | map(attribute='duration_ms') | max if report.tests else 1 %}
+                {% for test in report.tests %}
+                <tr class="test-row" data-status="{{ test.status }}">
+                    <td class="text-muted">{{ loop.index }}</td>
+                    <td>
+                        <a href="/test/{{ loop.index0 }}" class="test-name" style="font-weight: 600;">{{ test.name }}</a>
+                        <div class="text-muted" style="font-size: 11px;">{{ test.path }}</div>
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ test.status }}">{{ test.status }}</span>
+                    </td>
+                    <td class="text-mono" style="font-size: 12px;">
+                        {{ "%.0f"|format(test.duration_ms) }}ms
+                    </td>
+                    <td class="text-muted">{{ test.steps | length }}</td>
+                    <td>
+                        <div class="duration-bar">
+                            <div class="duration-bar-track">
+                                <div class="duration-bar-fill" style="width: {{ (test.duration_ms / max_duration * 100) if max_duration else 0 }}%; background: {% if test.status == 'passed' %}var(--success){% elif test.status == 'failed' %}var(--error){% else %}var(--warning){% endif %};"></div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if not report.tests %}
+<div class="card mt-4" style="text-align: center; padding: 60px;">
+    <div style="font-size: 48px; margin-bottom: 16px;">📊</div>
+    <h2 style="margin-bottom: 8px;">No test results yet</h2>
+    <p class="text-muted">Run your tests with PyShaft to generate a report.</p>
+    <code class="text-mono" style="display: block; margin-top: 16px; color: var(--accent-green); font-size: 14px;">
+        pytest --pyshaft
+    </code>
+</div>
+{% endif %}
+{% endblock %}

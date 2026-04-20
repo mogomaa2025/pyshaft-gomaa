@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}PyShaft Report — {{ test.name }}{% endblock %}
+
+{% block content %}
+<!-- Test Header -->
+<div class="flex justify-between items-center mb-4">
+    <div>
+        <h1 style="font-size: 20px; font-weight: 700;">{{ test.name }}</h1>
+        <div class="text-muted" style="font-size: 12px; margin-top: 4px;">{{ test.path }}</div>
+    </div>
+    <div class="flex gap-2 items-center">
+        <span class="badge badge-{{ test.status }}">{{ test.status }}</span>
+        <span class="text-mono text-muted" style="font-size: 13px;">{{ "%.0f"|format(test.duration_ms) }}ms</span>
+    </div>
+</div>
+
+{% if test.error %}
+<div class="card mb-4" style="border-color: var(--error);">
+    <div class="card-header" style="color: var(--error);">Error</div>
+    <div style="font-size: 13px; color: var(--error);">{{ test.error }}</div>
+    {% if test.error_traceback %}
+    <pre class="json-viewer mt-2" style="color: var(--text-secondary); font-size: 11px;">{{ test.error_traceback }}</pre>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Tabs -->
+<div>
+    <div class="tabs">
+        <div class="tab active" data-tab="tab-steps">📋 Steps ({{ test.steps | length }})</div>
+        <div class="tab" data-tab="tab-tracer">🔍 Tracer</div>
+        {% if test.screenshots %}<div class="tab" data-tab="tab-screenshots">📸 Screenshots ({{ test.screenshots | length }})</div>{% endif %}
+...
+    <!-- Steps Timeline -->
+...
+    <!-- Tracer View -->
+    <div id="tab-tracer" class="tab-content">
+        <div class="tracer-container">
+            <div class="tracer-steps">
+                {% for step in test.steps %}
+                <div class="tracer-step-item {{ step.status }}" onclick="showTracerScreenshot('{{ step.screenshot | replace('\\', '/') if step.screenshot else '' }}', this)">
+                    <div class="flex items-center gap-2">
+                        <span class="step-num">{{ loop.index }}</span>
+                        <div class="flex-1">
+                            <div class="step-action">{{ step.action }}</div>
+                            {% if step.locator %}<div class="step-locator">{{ step.locator }}</div>{% endif %}
+                        </div>
+                        {% if step.screenshot %}<span class="badge-passed" style="font-size: 9px; padding: 2px 6px;">📷</span>{% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="tracer-preview" id="tracer-preview">
+                <div class="tracer-empty">
+                    <p>Select a step to view the visual trace</p>
+                </div>
+                <img id="tracer-img" src="" style="display: none; width: 100%; border-radius: 8px; border: 1px solid var(--border);">
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .tracer-container { display: flex; gap: 16px; min-height: 500px; background: var(--bg-dark); border-radius: 8px; border: 1px solid var(--border); overflow: hidden; }
+        .tracer-steps { width: 350px; border-right: 1px solid var(--border); overflow-y: auto; max-height: 600px; }
+        .tracer-preview { flex: 1; padding: 16px; display: flex; align-items: center; justify-content: center; background: var(--bg-darkest); }
+        .tracer-step-item { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.2s; }
+        .tracer-step-item:hover { background: var(--bg-hover); }
+        .tracer-step-item.active { background: rgba(108, 99, 255, 0.15); border-left: 3px solid var(--accent-purple); }
+        .tracer-step-item.pass .step-num { color: var(--success); }
+        .tracer-step-item.fail .step-num { color: var(--error); }
+        .step-num { font-family: var(--text-mono); font-weight: 700; font-size: 14px; min-width: 24px; }
+        .tracer-empty { text-align: center; color: var(--text-muted); font-size: 13px; }
+    </style>
+
+    <script>
+        function showTracerScreenshot(path, element) {
+            // Update active state
+            document.querySelectorAll('.tracer-step-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+
+            const img = document.getElementById('tracer-img');
+            const empty = document.querySelector('.tracer-empty');
+            
+            if (path) {
+                // Ensure path starts with /screenshots/
+                const fileName = path.split('/').pop();
+                img.src = '/screenshots/' + fileName;
+                img.style.display = 'block';
+                empty.style.display = 'none';
+            } else {
+                img.style.display = 'none';
+                empty.style.display = 'block';
+                empty.innerHTML = '<p>No screenshot captured for this step.<br><small style="color: var(--text-muted)">Enable "screenshot_on_step" in pyshaft.toml to capture full traces.</small></p>';
+            }
+        }
+    </script>
+        {% if test.video_path %}<div class="tab" data-tab="tab-video">🎬 Video</div>{% endif %}
+        {% if test.api_calls %}<div class="tab" data-tab="tab-api">🔌 API Calls ({{ test.api_calls | length }})</div>{% endif %}
+    </div>
+
+    <!-- Steps Timeline -->
+    <div id="tab-steps" class="tab-content active">
+        <div class="timeline">
+            {% for step in test.steps %}
+            <div class="timeline-step {{ step.status }}">
+                <div class="step-info">
+                    <div class="step-action">
+                        <span style="color: var(--text-muted); font-size: 11px; margin-right: 6px;">{{ loop.index }}</span>
+                        {{ step.action }}
+                    </div>
+                    {% if step.locator %}
+                    <div class="step-locator">{{ step.locator }}</div>
+                    {% endif %}
+                    {% if step.error %}
+                    <div class="step-error">{{ step.error }}</div>
+                    {% endif %}
+                </div>
+                <div class="step-duration">{{ "%.0f"|format(step.duration_ms) }}ms</div>
+            </div>
+            {% endfor %}
+        </div>
+
+        {% if not test.steps %}
+        <div class="text-muted" style="padding: 32px; text-align: center;">No steps recorded for this test.</div>
+        {% endif %}
+    </div>
+
+    <!-- Screenshots -->
+    {% if test.screenshots %}
+    <div id="tab-screenshots" class="tab-content">
+        <div class="screenshot-grid">
+            {% for ss in test.screenshots %}
+            <div class="screenshot-item" onclick="openLightbox('/screenshots/{{ ss.path | replace('\\', '/') }}')">
+                <img src="/screenshots/{{ ss.path | replace('\\', '/') }}" alt="{{ ss.label }}" loading="lazy">
+                <div class="label">{{ ss.label }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Video -->
+    {% if test.video_path %}
+    <div id="tab-video" class="tab-content">
+        <div class="video-player">
+            <video controls preload="metadata">
+                <source src="/videos/{{ test.video_path | replace('\\', '/') }}" type="video/webm">
+                Your browser does not support video playback.
+            </video>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- API Calls -->
+    {% if test.api_calls %}
+    <div id="tab-api" class="tab-content">
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Method</th>
+                        <th>URL</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for call in test.api_calls %}
+                    <tr>
+                        <td>
+                            <span class="badge" style="background: rgba(108,99,255,0.15); color: var(--accent-purple);">{{ call.method }}</span>
+                        </td>
+                        <td class="text-mono" style="font-size: 12px;">{{ call.url }}</td>
+                        <td>
+                            <span class="badge {% if call.status_code < 300 %}badge-passed{% elif call.status_code < 500 %}badge-skipped{% else %}badge-failed{% endif %}">
+                                {{ call.status_code }}
+                            </span>
+                        </td>
+                        <td class="text-mono" style="font-size: 12px;">{{ "%.0f"|format(call.duration_ms) }}ms</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Back link -->
+<div class="mt-4">
+    <a href="/" class="btn">← Back to Dashboard</a>
+</div>
+{% endblock %}

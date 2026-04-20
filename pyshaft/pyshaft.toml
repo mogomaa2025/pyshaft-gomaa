@@ -1,0 +1,45 @@
+# ── PyShaft Configuration ──────────────────────────────────────
+# All values below are defaults. Only uncomment/change what you need.
+
+[browser]
+browser = "chrome"
+headless = false
+window_size = "1920x1080"
+base_url = ""
+navigation_timeout = 30
+
+[execution]
+parallel = false
+workers = "auto"
+retry_attempts = 0
+scope = "session"
+
+[waits]
+default_element_timeout = 10
+polling_interval = 0.25
+stability_threshold = 0.3
+network_idle_timeout = 3
+navigation_timeout = 30
+respect_native_waits = true
+
+[validations]
+force_element_visibility = true
+force_locator_unique = false
+force_text_verification = false
+force_navigation_check = true
+
+[actions]
+js_click_fallback = true
+
+[report]
+output_dir = "pyshaft-report2"
+screenshot_on_fail = true
+screenshot_on_step = false
+video_on_fail = false
+junit_xml = true
+json_report = true
+
+[api]
+base_url = ""
+timeout = 30
+verify_ssl = true

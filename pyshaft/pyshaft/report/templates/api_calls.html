@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}PyShaft Report — API Calls{% endblock %}
+{% block nav_api %}active{% endblock %}
+
+{% block content %}
+<h1 class="section-header">🔌 API Calls</h1>
+
+{% if calls %}
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>Test</th>
+                    <th>Method</th>
+                    <th>URL</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for call in calls %}
+                <tr>
+                    <td style="font-size: 12px;">{{ call.test_name }}</td>
+                    <td>
+                        <span class="badge" style="background: rgba(108,99,255,0.15); color: var(--accent-purple);">{{ call.method }}</span>
+                    </td>
+                    <td class="text-mono" style="font-size: 12px;">{{ call.url }}</td>
+                    <td>
+                        <span class="badge {% if call.status_code < 300 %}badge-passed{% elif call.status_code < 500 %}badge-skipped{% else %}badge-failed{% endif %}">
+                            {{ call.status_code }}
+                        </span>
+                    </td>
+                    <td class="text-mono" style="font-size: 12px;">{{ "%.0f"|format(call.duration_ms) }}ms</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card" style="text-align: center; padding: 60px;">
+    <div style="font-size: 48px; margin-bottom: 16px;">🔌</div>
+    <h2 style="margin-bottom: 8px;">No API calls recorded</h2>
+    <p class="text-muted">API calls made during tests will appear here.</p>
+</div>
+{% endif %}
+{% endblock %}

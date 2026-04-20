@@ -1,0 +1,5 @@
+[browser]
+base_url = "https://practicetestautomation.com"
+
+[api]
+base_url = "https://reqres.in/api"
