@@ -7,3 +7,5 @@ jsonpath-ng>=1.6.0
 flask>=3.0
 PyQt6>=6.5
 websocket-client>=1.6
+pyotp>=2.9.0
+jsonschema

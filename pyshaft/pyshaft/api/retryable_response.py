@@ -114,12 +114,25 @@ class RetryableResponse:
         """Assert that an array at path contains an object matching the criteria."""
         def _do_assert():
             self._response.assert_json_in_array(path, criteria)
-        
+
         if self._retry_config:
-            self._retry_config.apply_to_function(_do_assert)
+            self._execute_with_retry(_do_assert, "assert_json_in_array")
         else:
             _do_assert()
-        
+
+        self._retry_config = None
+        return self
+
+    def assert_schema(self, schema: dict, path: str = "$") -> "RetryableResponse":
+        """Assert that a JSON value at path matches a JSON Schema."""
+        def _do_assert():
+            self._response.assert_schema(schema, path=path)
+
+        if self._retry_config:
+            self._execute_with_retry(_do_assert, "assert_schema")
+        else:
+            _do_assert()
+
         self._retry_config = None
         return self
 
@@ -142,9 +155,8 @@ class RetryableResponse:
         self._response.for_each_key(path, callback)
         return self
 
-    def prettify(self) -> "RetryableResponse":
-        """Execute and print the pretty response body."""
-        self._response.prettify()
+def prettify(self, verbose: bool = True, max_length: int = 2000) -> "RetryableResponse":
+        self._response.prettify(verbose=verbose, max_length=max_length)
         return self
 
     def assert_json_path(self, path: str, expected: Any = None) -> Any:

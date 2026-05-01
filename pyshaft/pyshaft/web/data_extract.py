@@ -61,6 +61,22 @@ def get_selected_option(locator: str) -> str:
     return run_action("get_selected_option", locator, _get)
 
 
+def get_selected_options(locator: str) -> list[str]:
+    """Get the visible text of all currently selected options in a <select multiple>.
+
+    Args:
+        locator: Element locator for the <select> element.
+
+    Returns:
+        List of visible texts of selected options.
+    """
+    def _get_many(element: WebElement) -> list[str]:
+        sel = Select(element)
+        return [opt.text for opt in sel.all_selected_options]
+
+    return run_action("get_selected_options", locator, _get_many)
+
+
 def get_selected_value(locator: str) -> str:
     """Get the value attribute of the currently selected option in a <select>.
 

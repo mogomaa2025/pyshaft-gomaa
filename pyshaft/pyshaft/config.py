@@ -90,11 +90,13 @@ class ActionsConfig:
 class ReportConfig:
     """[report] section — output and capture settings."""
     output_dir: str = "pyshaft-report"
+    downloads_dir: str = "pyshaft-downloads"
     screenshot_on_fail: bool = True
     screenshot_on_step: bool = False
     video_on_fail: bool = False
     junit_xml: bool = True
     json_report: bool = True
+    open_on_fail: bool = False  # Open HTML report automatically on test failure
 
 
 @dataclass

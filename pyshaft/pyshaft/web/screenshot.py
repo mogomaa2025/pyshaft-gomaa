@@ -43,18 +43,24 @@ def take_screenshot(path: str | None = None) -> str:
     return run_driver_action("take_screenshot", "browser viewport", _take)
 
 
-def take_element_screenshot(locator: str, path: str | None = None) -> str:
+def take_element_screenshot(locator: str, path: str | None = None, name: str | None = None) -> str:
     """Capture a screenshot of a specific element.
 
     Args:
         locator: Locator for the target element.
-        path: Optional file path.
+        path: Optional full file path.
+        name: Optional simple name (saved to saved_snapshots/<name>.png).
 
     Returns:
         The absolute path to the saved screenshot.
     """
     def _take(element: WebElement) -> str:
         nonlocal path
+        if name:
+            base_dir = Path("saved_snapshots")
+            base_dir.mkdir(exist_ok=True)
+            path = str(base_dir / f"{name}.png")
+            
         if not path:
             report_dir = Path("pyshaft-report")
             report_dir.mkdir(exist_ok=True)

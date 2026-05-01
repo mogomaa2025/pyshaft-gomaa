@@ -16,8 +16,8 @@ import time
 from functools import partial
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QUrl
-from PyQt6.QtGui import QAction, QKeySequence, QFont
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QUrl, QRect
+from PyQt6.QtGui import QAction, QKeySequence, QFont, QPixmap
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QFrame, QPushButton, QLabel, QLineEdit, QTabWidget,
@@ -113,6 +113,122 @@ class DockTitleBar(QWidget):
         # I'll just make the x very visible.
 
 
+from PyQt6.QtWidgets import QCompleter, QScrollArea, QGroupBox
+from PyQt6.QtGui import QTextCursor
+
+class PyShaftCodeEditor(QPlainTextEdit):
+    """A code editor with basic PyShaft command completion."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(False)
+        self.setFont(QFont("Cascadia Code", 11))
+        self.setStyleSheet(f"""
+            QPlainTextEdit {{
+                background-color: {COLORS['bg_darkest']};
+                color: {COLORS['accent_green']};
+                border: none;
+                padding: 12px;
+                font-family: {FONTS['family_mono']};
+            }}
+        """)
+        
+        # Setup Completer
+        self.completer = QCompleter([
+            "click", "double_click", "right_click", "type", "hover", "scroll",
+            "select", "check", "uncheck", "submit", "clear", "press",
+            "wait_until", "wait_until_disappears",
+            "assert_visible", "assert_hidden", "assert_text", "assert_contain_text",
+            "assert_enabled", "assert_disabled", "assert_checked",
+            "assert_title", "assert_url", "assert_contain_title", "assert_contain_url",
+            "assert_data_type", "assert_value", "assert_snapshot",
+            "get_text", "get_value", "get_attribute", "get_selected_option",
+            "open", "go_back", "go_forward", "refresh", "switch_to_iframe"
+        ], self)
+        self.completer.setWidget(self)
+        self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.completer.activated.connect(self._insert_completion)
+
+    def _insert_completion(self, completion):
+        tc = self.textCursor()
+        extra = len(completion) - len(self.completer.completionPrefix())
+        tc.movePosition(QTextCursor.MoveOperation.Left)
+        tc.movePosition(QTextCursor.MoveOperation.EndOfWord)
+        tc.insertText(completion[-extra:])
+        self.setTextCursor(tc)
+
+    def text_under_cursor(self):
+        tc = self.textCursor()
+        tc.select(QTextCursor.SelectionType.WordUnderCursor)
+        return tc.selectedText()
+
+    def keyPressEvent(self, event):
+        if self.completer and self.completer.popup().isVisible():
+            if event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Escape, Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+                event.ignore()
+                return
+
+        # Trigger completer on '.' or after a few characters
+        is_shortcut = (event.modifiers() & Qt.KeyboardModifier.ControlModifier) and event.key() == Qt.Key.Key_Space
+        super().keyPressEvent(event)
+
+        completion_prefix = self.text_under_cursor()
+        if not is_shortcut and (not event.text() or len(completion_prefix) < 2):
+            self.completer.popup().hide()
+            return
+
+        if completion_prefix != self.completer.completionPrefix():
+            self.completer.setCompletionPrefix(completion_prefix)
+            self.completer.popup().setCurrentIndex(self.completer.completionModel().index(0, 0))
+
+        cr = self.cursorRect()
+        cr.setWidth(self.completer.popup().sizeHintForColumn(0) + self.completer.popup().verticalScrollBar().sizeHint().width())
+        self.completer.complete(cr)
+
+
+class HelpPanel(QWidget):
+    """A friendly guide for manual testers."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+        
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setSpacing(12)
+        
+        title = QLabel("💡 Quick Guide for Testers")
+        title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLORS['accent_purple']}; padding: 5px;")
+        content_layout.addWidget(title)
+        
+        tips = [
+            ("🔍 How to start?", "Click the <b>Inspector</b> icon (eyeglass) and then click any element on the webpage to see options."),
+            ("⏺ Auto-Recording", "Toggle the <b>Record</b> button to capture your actions (clicks, typing) as you perform them."),
+            ("📋 Creating Assertions", "Use the Inspector to click an element, then pick an <b>Assertion</b> (like 'Visible' or 'Text') to verify it."),
+            ("⚙️ Locators", "Elements have 'addresses' called Locators. PyShaft finds the most stable one, but you can pick others if needed."),
+            ("📝 Editing Code", "The tabs below show your actions as Python code. You can edit them manually; use <b>Ctrl+Space</b> for suggestions!"),
+            ("🔀 Workflow", "Check the <b>Workflow</b> tab to see a visual diagram of your test steps.")
+        ]
+        
+        for t_title, t_text in tips:
+            group = QGroupBox(t_title)
+            group_layout = QVBoxLayout(group)
+            lbl = QLabel(t_text)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px;")
+            group_layout.addWidget(lbl)
+            content_layout.addWidget(group)
+            
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+
+
 class MainWindow(QMainWindow):
     """Main recorder window with integrated web view."""
 
@@ -147,11 +263,7 @@ class MainWindow(QMainWindow):
         # Element action popup (shown on inspector click)
         self._element_popup = ElementActionPopup()
         self._element_popup.step_requested.connect(self._on_step_from_popup)
-
-        # Auto-refresh timer for code output
-        self._refresh_timer = QTimer()
-        self._refresh_timer.timeout.connect(self._refresh_code_output)
-        self._refresh_timer.start(500)
+        self._element_popup.snapshot_capture_requested.connect(self._on_snapshot_capture_requested)
 
         # Command palette
         self._command_palette = CommandPalette(self)
@@ -169,6 +281,7 @@ class MainWindow(QMainWindow):
         mode_map = {"inspect": 0, "record": 1, "both": 2}
         self._mode_combo.setCurrentIndex(mode_map.get(self._start_mode, 0))
         self._update_ui_state()
+        self._refresh_code_output()
 
     def _setup_web_engine(self):
         """Configure the integrated web view."""
@@ -472,6 +585,7 @@ class MainWindow(QMainWindow):
         self._inspector = InspectorPanel()
         self._inspector.setMinimumWidth(280)
         self._inspector.step_requested.connect(self._on_step_from_inspector)
+        self._inspector.snapshot_capture_requested.connect(self._on_snapshot_capture_requested)
 
         self._right_dock = QDockWidget("Inspector", self)
         self._right_dock.setObjectName("inspector_dock")
@@ -485,35 +599,63 @@ class MainWindow(QMainWindow):
         bottom_tabs.setMinimumHeight(200)
 
         # Basic Code tab
-        def create_code_editor():
-            editor = QPlainTextEdit()
-            editor.setReadOnly(True)
-            editor.setFont(QFont("Cascadia Code", 11))
-            editor.setStyleSheet(f"""
-                QPlainTextEdit {{
-                    background-color: {COLORS['bg_darkest']};
-                    color: {COLORS['accent_green']};
-                    border: none;
-                    padding: 12px;
-                    font-family: {FONTS['family_mono']};
-                }}
-            """)
-            return editor
+        def create_code_editor_with_copy(title: str = ""):
+            container = QWidget()
+            layout = QVBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
 
-        self._code_output = create_code_editor()
-        bottom_tabs.addTab(self._code_output, f"{ICONS['code']}  Code")
+            # Mini header for the editor
+            header = QFrame()
+            header.setStyleSheet(f"background: {COLORS['bg_dark']}; border-bottom: 1px solid {COLORS['border']};")
+            h_layout = QHBoxLayout(header)
+            h_layout.setContentsMargins(8, 4, 8, 4)
+            
+            if title:
+                lbl = QLabel(title)
+                lbl.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px; font-weight: bold;")
+                h_layout.addWidget(lbl)
+            
+            h_layout.addStretch()
+            
+            copy_btn = QPushButton(f"{ICONS.get('copy', '📋')} Copy")
+            copy_btn.setFixedSize(65, 22)
+            copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            copy_btn.setStyleSheet(f"""
+                QPushButton {{
+                    font-size: 10px; padding: 0; background: {COLORS['bg_card']}; border: 1px solid {COLORS['border']};
+                }}
+                QPushButton:hover {{ background: {COLORS['bg_hover']}; }}
+            """)
+            h_layout.addWidget(copy_btn)
+
+            editor = PyShaftCodeEditor()
+            
+            layout.addWidget(header)
+            layout.addWidget(editor)
+            
+            copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(editor.toPlainText()))
+            
+            return container, editor
+
+        self._code_container, self._code_output = create_code_editor_with_copy()
+        bottom_tabs.addTab(self._code_container, f"{ICONS['code']}  Code")
         
         # POM Tab container
         self._pom_tab_widget = QTabWidget()
-        self._test_output = create_code_editor()
-        self._page_output = create_code_editor()
-        self._data_output = create_code_editor()
+        self._test_container, self._test_output = create_code_editor_with_copy("TEST")
+        self._page_container, self._page_output = create_code_editor_with_copy("PAGE")
+        self._data_container, self._data_output = create_code_editor_with_copy("DATA")
 
-        self._pom_tab_widget.addTab(self._test_output, "test.py")
-        self._pom_tab_widget.addTab(self._page_output, "page.py")
-        self._pom_tab_widget.addTab(self._data_output, "data.py")
+        self._pom_tab_widget.addTab(self._test_container, "test.py")
+        self._pom_tab_widget.addTab(self._page_container, "page.py")
+        self._pom_tab_widget.addTab(self._data_container, "data.py")
         
         bottom_tabs.addTab(self._pom_tab_widget, "📦  POM")
+
+        # Guide Tab for manual testers
+        self._help_panel = HelpPanel()
+        bottom_tabs.addTab(self._help_panel, "💡  Guide")
 
         # Code mode toggle for the basic Code tab
         self._code_mode_combo = QComboBox()
@@ -553,12 +695,29 @@ class MainWindow(QMainWindow):
 
     def _setup_status_bar(self):
         status = self.statusBar()
-        self._status_bar_label = QLabel("Ready")
+        status.setStyleSheet(f"""
+            QStatusBar {{
+                background-color: {COLORS['bg_darkest']};
+                border-top: 1px solid {COLORS['border']};
+                color: {COLORS['text_secondary']};
+            }}
+            QStatusBar::item {{ border: none; }}
+        """)
+        
+        self._status_bar_label = QLabel("  Ready")
+        self._status_bar_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-weight: 500;")
         status.addWidget(self._status_bar_label)
 
-        self._step_count_label = QLabel("0 steps")
-        self._step_count_label.setStyleSheet(f"color: {COLORS['text_muted']};")
+        self._step_count_label = QLabel(" 0 steps  ")
+        self._step_count_label.setStyleSheet(f"""
+            color: {COLORS['accent_purple']}; 
+            font-weight: bold; 
+            background-color: {COLORS['bg_dark']};
+            border-left: 1px solid {COLORS['border']};
+            padding: 0 10px;
+        """)
         status.addPermanentWidget(self._step_count_label)
+
 
     # -------------------------------------------------------------------------
     # Keyboard Shortcuts
@@ -727,6 +886,33 @@ class MainWindow(QMainWindow):
     # Browser Event Handlers
     # -------------------------------------------------------------------------
 
+    def _on_snapshot_capture_requested(self, name: str, meta: dict):
+        """Take a screenshot of the element and save as baseline."""
+        rect_data = meta.get("rect", {})
+        if not rect_data:
+            return
+            
+        # Element rect in viewport
+        rx = rect_data.get("x", 0)
+        ry = rect_data.get("y", 0)
+        rw = rect_data.get("width", 100)
+        rh = rect_data.get("height", 100)
+        
+        # Grab from web view widget
+        # Note: We use a small delay to ensure any highlight is gone, 
+        # but the popup call is already after the event.
+        pixmap = self._web_view.grab(QRect(rx, ry, rw, rh))
+        
+        # Save to saved_snapshots
+        base_dir = Path("saved_snapshots")
+        base_dir.mkdir(exist_ok=True)
+        path = base_dir / f"{name}.png"
+        
+        if pixmap.save(str(path), "PNG"):
+             self._status_bar_label.setText(f"  📸 Captured baseline: {name}.png")
+        else:
+             logger.error("Failed to save snapshot: %s", path)
+
     def _handle_browser_event(self, event: dict):
         """Process browser event on the main thread."""
         event_type = event.get("type", "")
@@ -818,25 +1004,29 @@ class MainWindow(QMainWindow):
             step.typed_text = path
             step.action = "upload_file"
         elif step.action == "pick_date":
-            date, ok = QInputDialog.getText(self, "Pick Date", "Enter date (e.g. 2023-12-25):")
-            if not (ok and date): return
-            step.typed_text = date
+            if not step.typed_text:
+                date, ok = QInputDialog.getText(self, "Pick Date", "Enter date (e.g. 2023-12-25):")
+                if not (ok and date): return
+                step.typed_text = date
         elif step.action == "type":
-            text, ok = QInputDialog.getText(self, "Type Text", "Enter text to type:")
-            if not (ok and text): return
-            step.typed_text = text
+            if not step.typed_text:
+                text, ok = QInputDialog.getText(self, "Type Text", "Enter text to type:")
+                if not (ok and text): return
+                step.typed_text = text
         elif step.action == "select":
-            opt, ok = QInputDialog.getText(self, "Select Option", "Enter option text or index:")
-            if not (ok and opt): return
-            step.typed_text = opt
+            if not step.typed_text:
+                opt, ok = QInputDialog.getText(
+                    self, "Select Option", "Enter option text, value, or index:"
+                )
+                if not (ok and opt): return
+                step.typed_text = opt
         elif step.action == "assert_snapshot":
-            name, ok = QInputDialog.getText(self, "Snapshot", "Name for this snapshot:")
-            if not (ok and name): return
-            step.assert_expected = name
+            pass # Handled in popup
         elif step.action == "assert_text" or step.action == "assert_contain_text":
-            expected, ok = QInputDialog.getText(self, "Assert Text", "Expected text:")
-            if not (ok and expected): return
-            step.assert_expected = expected
+            if not step.assert_expected:
+                expected, ok = QInputDialog.getText(self, "Assert Text", "Expected text:")
+                if not (ok and expected): return
+                step.assert_expected = expected
         elif step.action == "wait_disappear":
             step.action = "wait_until_disappears"
 

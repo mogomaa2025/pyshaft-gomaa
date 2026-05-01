@@ -67,6 +67,23 @@ def remove_element(locator: str) -> None:
 
     run_action("remove_element", locator, _remove)
 
+
+def remove_elements(locator: str) -> None:
+    """Remove all elements matching the locator from the DOM via JavaScript.
+
+    Args:
+        locator: Locator for the target elements to remove.
+    """
+    def _remove_all(driver: WebDriver) -> None:
+        from pyshaft.core.locator import DualLocator
+
+        elements = DualLocator.resolve_all(driver, locator)
+        for el in elements:
+            driver.execute_script("arguments[0].remove();", el)
+
+    run_driver_action("remove_elements", locator, _remove_all)
+
+
 def set_value_js(locator: str, value: str) -> None:
     """Set an element's value property directly via JavaScript.
 
@@ -92,3 +109,21 @@ def scroll_into_view(locator: str) -> None:
         element.parent.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
 
     run_action("scroll_into_view", locator, _scroll)
+
+
+def ad_block() -> None:
+    """Block common advertisement elements from loading on the page."""
+    ad_selectors = [
+        '[aria-label="Ads"]',
+        '[src*="adservice."]',
+        '[src*="doubleclick"]',
+        '[class*="sponsored-content"]',
+        '[class*="adsbygoogle"]',
+        'iframe[src*="doubleclick"]',
+        '[id*="-ad-"]',
+        '[id*="_ads_"]',
+        "ins.adsby",
+    ]
+    for selector in ad_selectors:
+        remove_elements(selector)
+    logger.info("Ad blocking applied to the current page.")

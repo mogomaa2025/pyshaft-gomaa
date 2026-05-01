@@ -7,6 +7,7 @@ dropdowns, checkboxes, and file uploads.
 from __future__ import annotations
 
 import logging
+import os
 
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webelement import WebElement
@@ -83,7 +84,14 @@ def press_key(locator: str, key: str) -> None:
 
 def upload_file(locator: str, file_path: str) -> None:
     """Upload a file to a file input element."""
-    run_action("upload_file", locator, lambda el: el.send_keys(file_path))
+    abs_path = os.path.abspath(file_path)
+    run_action("upload_file", locator, lambda el: el.send_keys(abs_path))
+
+
+def upload_files(locator: str, file_paths: list[str]) -> None:
+    """Upload multiple files to a file input element (if it supports multiple)."""
+    abs_paths = "\n".join(os.path.abspath(p) for p in file_paths)
+    run_action("upload_files", locator, lambda el: el.send_keys(abs_paths))
 
 
 def get_text(locator: str) -> str:
@@ -116,6 +124,45 @@ def select_option(locator: str, value: str | int) -> None:
     run_action("select_option", locator, _select)
 
 
+def select_options(locator: str, values: list[str | int]) -> None:
+    """Select multiple options in a <select multiple> element."""
+    def _select_many(element: WebElement) -> None:
+        sel = Select(element)
+        if not sel.is_multiple:
+            logger.warning("Attempting select_options on a single-select dropdown: %s", locator)
+            
+        for val in values:
+            if isinstance(val, int):
+                sel.select_by_index(val)
+            else:
+                try:
+                    sel.select_by_value(val)
+                except Exception:
+                    sel.select_by_visible_text(val)
+
+    run_action("select_options", locator, _select_many)
+
+
+def deselect_option(locator: str, value: str | int) -> None:
+    """Deselect an option in a <select multiple> element."""
+    def _deselect(element: WebElement) -> None:
+        sel = Select(element)
+        if isinstance(value, int):
+            sel.deselect_by_index(value)
+        else:
+            try:
+                sel.deselect_by_value(value)
+            except Exception:
+                sel.deselect_by_visible_text(value)
+
+    run_action("deselect_option", locator, _deselect)
+
+
+def deselect_all_options(locator: str) -> None:
+    """Deselect all options in a <select multiple> element."""
+    run_action("deselect_all_options", locator, lambda el: Select(el).deselect_all())
+
+
 def check_checkbox(locator: str) -> None:
     """Ensure a checkbox or radio button is checked."""
     def _check(element: WebElement) -> None:
@@ -132,3 +179,18 @@ def uncheck_checkbox(locator: str) -> None:
             element.click()
 
     run_action("uncheck_checkbox", locator, _uncheck)
+
+
+def enter_mfa_code(locator: str, totp_key: str) -> None:
+    """Generate a TOTP code and type it into the specified field.
+
+    Args:
+        locator: Element locator for the 2FA input field.
+        totp_key: The secret TOTP key (base32).
+    """
+    import pyotp
+
+    totp = pyotp.TOTP(totp_key)
+    code = totp.now()
+    logger.info("Generated MFA code for key %s", totp_key[:4] + "****")
+    type_text(locator, code)

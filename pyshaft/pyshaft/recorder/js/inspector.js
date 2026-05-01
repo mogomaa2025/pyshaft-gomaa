@@ -186,24 +186,146 @@
     _overlay.style.height = rect.height + "px";
 
     // Tooltip content
-    let desc = el.tagName.toLowerCase();
-    if (el.id) desc += "#" + el.id;
-    if (el.classList.length > 0) desc += "." + Array.from(el.classList).slice(0, 2).join(".");
-    if (el.getAttribute("role")) desc += ` [${el.getAttribute("role")}]`;
+    const tagStr = `<span style="color:#6C63FF; font-weight:bold">${el.tagName.toLowerCase()}</span>`;
+    const dimStr = `<span style="color:#8B949E; margin-left:8px">${Math.round(rect.width)} × ${Math.round(rect.height)}</span>`;
+    
+    let details = "";
+    if (el.id) details += `<div style="color:#E3B341">#${el.id}</div>`;
+    if (el.classList.length > 0) details += `<div style="color:#79C0FF">.${Array.from(el.classList).slice(0, 2).join(".")}</div>`;
+    if (el.getAttribute("role")) details += `<div style="color:#8B949E; font-size:10px; text-transform:uppercase">[${el.getAttribute("role")}]</div>`;
 
-    _tooltip.textContent = desc;
+    _tooltip.innerHTML = `<div style="display:flex; flex-direction:column; gap:2px">${tagStr}${dimStr}${details}</div>`;
     _tooltip.style.display = "block";
 
     // Position tooltip above or below element
-    let tooltipTop = rect.top - 30;
-    if (tooltipTop < 5) tooltipTop = rect.bottom + 5;
-    _tooltip.style.left = Math.max(5, rect.left) + "px";
+    let tooltipTop = rect.top - _tooltip.offsetHeight - 8;
+    if (tooltipTop < 5) tooltipTop = rect.bottom + 8;
+    _tooltip.style.left = Math.max(8, rect.left) + "px";
     _tooltip.style.top = tooltipTop + "px";
   }
 
   function onMouseLeave(e) {
     if (_overlay) _overlay.style.display = "none";
     if (_tooltip) _tooltip.style.display = "none";
+  }
+
+  function getAriaTree(root) {
+    const roles_to_ignore = ['presentation', 'none', 'generic'];
+    
+    function isVisible(el) {
+        if (!el) return false;
+        if (el.getAttribute('aria-hidden') === 'true') return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    function getRole(el) {
+        const explicitRole = el.getAttribute('role');
+        if (explicitRole) return explicitRole;
+        
+        const tag = el.tagName.toLowerCase();
+        const type = el.getAttribute('type');
+        
+        if (tag === 'button') return 'button';
+        if (tag === 'input') {
+            if (['button', 'submit', 'reset'].includes(type)) return 'button';
+            if (type === 'checkbox') return 'checkbox';
+            if (type === 'radio') return 'radio';
+            if (type === 'image') return 'button';
+            return 'textbox';
+        }
+        if (tag === 'textarea') return 'textbox';
+        if (tag === 'select') return 'combobox';
+        if (tag === 'a' && el.getAttribute('href')) return 'link';
+        if (/^h[1-6]$/.test(tag)) return 'heading';
+        if (tag === 'table') return 'table';
+        if (tag === 'ul' || tag === 'ol') return 'list';
+        if (tag === 'li') return 'listitem';
+        if (tag === 'form') return 'form';
+        if (tag === 'nav') return 'navigation';
+        if (tag === 'header') return 'banner';
+        if (tag === 'footer') return 'contentinfo';
+        if (tag === 'main') return 'main';
+        if (tag === 'aside') return 'complementary';
+        if (tag === 'section' && (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby'))) return 'region';
+        
+        return null;
+    }
+
+    function getName(el, role) {
+        // 1. aria-label
+        let name = el.getAttribute('aria-label');
+        if (name) return name.trim();
+        
+        // 2. aria-labelledby
+        const labelId = el.getAttribute('aria-labelledby');
+        if (labelId) {
+            const labelEl = document.getElementById(labelId);
+            if (labelEl) return labelEl.innerText.trim();
+        }
+
+        // 3. label for (inputs)
+        if (el.id) {
+            const label = document.querySelector(`label[for="${el.id}"]`);
+            if (label) return label.innerText.trim();
+        }
+
+        // 4. placeholder
+        const placeholder = el.getAttribute('placeholder');
+        if (placeholder) return placeholder.trim();
+        
+        // 5. title
+        const title = el.getAttribute('title');
+        if (title) return title.trim();
+
+        // 6. alt (images)
+        const alt = el.getAttribute('alt');
+        if (alt) return alt.trim();
+
+        // 7. inner text for specific roles
+        const textRoles = ['button', 'link', 'heading', 'listitem', 'menuitem', 'tab', 'option'];
+        if (textRoles.includes(role)) {
+            // Only get direct text or flattened child text
+            return el.innerText.trim().replace(/\s+/g, ' ');
+        }
+        
+        return '';
+    }
+
+    function buildNode(el) {
+        if (!isVisible(el)) return null;
+
+        const role = getRole(el);
+        const name = role ? getName(el, role) : '';
+        
+        const children = [];
+        for (const child of el.children) {
+            const node = buildNode(child);
+            if (node) {
+                if (Array.isArray(node)) children.push(...node);
+                else children.push(node);
+            }
+        }
+
+        if (!role || roles_to_ignore.includes(role)) {
+            // Container node — flatten if possible
+            return children.length > 0 ? children : null;
+        }
+
+        const node = { role };
+        if (name) node.name = name;
+        
+        if (role === 'heading') {
+            const levelMatch = el.tagName.match(/H(\d)/i);
+            if (levelMatch) node.level = parseInt(levelMatch[1], 10);
+        }
+        
+        if (children.length > 0) node.children = children;
+        return node;
+    }
+
+    const tree = buildNode(root);
+    return Array.isArray(tree) ? tree[0] : tree;
   }
 
   function onClickCapture(e) {
@@ -217,6 +339,9 @@
 
     const meta = getElementMeta(e.target);
     if (!meta) return;
+    
+    // Add aria tree
+    meta.aria_tree = getAriaTree(e.target);
 
     const locators = generateLocators(meta);
 

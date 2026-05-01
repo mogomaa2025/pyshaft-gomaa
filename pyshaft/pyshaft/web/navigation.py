@@ -66,6 +66,16 @@ def close_window() -> None:
     run_driver_action("close_window", "current window", lambda d: d.close())
 
 
+def open_new_window(switch_to: bool = True) -> None:
+    """Open a new browser window/tab."""
+    def _open(driver: WebDriver) -> None:
+        driver.execute_script("window.open('');")
+        if switch_to:
+            driver.switch_to.window(driver.window_handles[-1])
+
+    run_driver_action("open_new_window", "new window", _open)
+
+
 def switch_to_window(handle_or_index: str | int) -> None:
     """Switch focus to a different browser window/tab."""
     def _switch(driver: WebDriver) -> None:
@@ -76,6 +86,11 @@ def switch_to_window(handle_or_index: str | int) -> None:
             driver.switch_to.window(handle_or_index)
 
     run_driver_action("switch_to_window", str(handle_or_index), _switch)
+
+
+def switch_to_newest_window() -> None:
+    """Switch focus to the most recently opened window/tab."""
+    run_driver_action("switch_to_newest_window", "newest window", lambda d: d.switch_to.window(d.window_handles[-1]))
 
 
 def switch_to_frame(locator: str | int) -> None:

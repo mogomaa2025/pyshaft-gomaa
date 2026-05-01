@@ -1,0 +1,144 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuites name="PyShaft Test Suite" tests="1" failures="1" errors="0" skipped="0" time="6.711">
+  <testsuite name="PyShaft Test Suite" tests="1" failures="1" errors="0" skipped="0" time="6.711">
+    <testcase name="test_aa" classname="tests/examples/aa.py::test_aa" time="6.711">
+      <failure message="[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'api.petstoreapi.com'. (_ssl.c:1032)">Traceback (most recent call last):
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpx\_transports\default.py", line 250, in handle_request
+    resp = self._pool.handle_request(req)
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpcore\_sync\connection_pool.py", line 256, in handle_request
+    raise exc from None
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpcore\_sync\connection_pool.py", line 236, in handle_request
+    response = connection.handle_request(
+        pool_request.request
+    )
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpcore\_sync\connection.py", line 101, in handle_request
+    raise exc
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpcore\_sync\connection.py", line 78, in handle_request
+    stream = self._connect(request)
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpcore\_sync\connection.py", line 156, in _connect
+    stream = stream.start_tls(**kwargs)
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpcore\_backends\sync.py", line 154, in start_tls
+    with map_exceptions(exc_map):
+         ~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\mgomaa\AppData\Local\Programs\Python\Python313\Lib\contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'api.petstoreapi.com'. (_ssl.c:1032)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\_pytest\runner.py", line 353, in from_call
+    result: TResult | None = func()
+                             ~~~~^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\_pytest\runner.py", line 245, in &lt;lambda&gt;
+    lambda: runtest_hook(item=item, **kwds),
+            ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\pluggy\_callers.py", line 167, in _multicall
+    raise exception
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\pluggy\_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\_pytest\logging.py", line 850, in pytest_runtest_call
+    yield
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\pluggy\_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\_pytest\capture.py", line 900, in pytest_runtest_call
+    return (yield)
+            ^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\pluggy\_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\_pytest\skipping.py", line 268, in pytest_runtest_call
+    return (yield)
+            ^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\_pytest\runner.py", line 179, in pytest_runtest_call
+    item.runtest()
+    ~~~~~~~~~~~~^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\_pytest\python.py", line 1720, in runtest
+    self.ihook.pytest_pyfunc_call(pyfuncitem=self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\pluggy\_callers.py", line 167, in _multicall
+    raise exception
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\_pytest\python.py", line 166, in pytest_pyfunc_call
+    result = testfunction(**testargs)
+  File "D:\automation\me\pyshaft\tests\examples\aa.py", line 35, in test_aa
+    .prettify()
+     ~~~~~~~~^^
+  File "D:\automation\me\pyshaft\pyshaft\api\__init__.py", line 130, in prettify
+    self._get_builder().prettify(verbose=verbose, max_length=max_length)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\pyshaft\api\builder.py", line 296, in prettify
+    self._ensure_performed().prettify(verbose=verbose, max_length=max_length)
+    ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\automation\me\pyshaft\pyshaft\api\builder.py", line 255, in _ensure_performed
+    return self.perform()
+           ~~~~~~~~~~~~^^
+  File "D:\automation\me\pyshaft\pyshaft\api\builder.py", line 230, in perform
+    resp = send_post(self._url, self._body, **call_kwargs)
+  File "D:\automation\me\pyshaft\pyshaft\api\methods.py", line 31, in send_post
+    return ApiResponse(client.post(url, **kwargs))
+                       ~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpx\_client.py", line 1144, in post
+    return self.request(
+           ~~~~~~~~~~~~^
+        "POST",
+        ^^^^^^^
+    ...&lt;11 lines&gt;...
+        extensions=extensions,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpx\_client.py", line 825, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpx\_client.py", line 914, in send
+    response = self._send_handling_auth(
+        request,
+    ...&lt;2 lines&gt;...
+        history=[],
+    )
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpx\_client.py", line 942, in _send_handling_auth
+    response = self._send_handling_redirects(
+        request,
+        follow_redirects=follow_redirects,
+        history=history,
+    )
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpx\_client.py", line 979, in _send_handling_redirects
+    response = self._send_single_request(request)
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpx\_client.py", line 1014, in _send_single_request
+    response = transport.handle_request(request)
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpx\_transports\default.py", line 249, in handle_request
+    with map_httpcore_exceptions():
+         ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\mgomaa\AppData\Local\Programs\Python\Python313\Lib\contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "D:\automation\me\pyshaft\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'api.petstoreapi.com'. (_ssl.c:1032)
+</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

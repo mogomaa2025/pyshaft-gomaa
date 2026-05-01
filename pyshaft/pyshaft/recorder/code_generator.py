@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pyshaft.recorder.models import RecordedStep, RecordingSession
@@ -81,45 +82,31 @@ def generate_code(
 
 def _collect_imports(steps: list[RecordedStep]) -> str:
     """Collect all required imports from the steps."""
-    locator_names = set()
-    element_names = set()
+    # Collect locator names using set comprehension
+    locator_names = {
+        _LOCATOR_IMPORTS[st] 
+        for s in steps 
+        for st in [s.locator_type, *(s.inside[0] if s.inside else []), *s.filters.keys()]
+        if st in _LOCATOR_IMPORTS
+    }
 
-    for step in steps:
-        if step.locator_type and step.locator_type in _LOCATOR_IMPORTS:
-            locator_names.add(_LOCATOR_IMPORTS[step.locator_type])
-
-        # Check if value is an element constant
-        if step.locator_value in _ELEMENT_IMPORTS:
-            py_name = _ELEMENT_UNDERSCORE.get(step.locator_value, step.locator_value)
-            element_names.add(py_name)
-
-        # Check inside clause
-        if step.inside:
-            inside_type, inside_value = step.inside
-            if inside_type in _LOCATOR_IMPORTS:
-                locator_names.add(_LOCATOR_IMPORTS[inside_type])
-            if inside_value in _ELEMENT_IMPORTS:
-                py_name = _ELEMENT_UNDERSCORE.get(inside_value, inside_value)
-                element_names.add(py_name)
-
-        # Check filters
-        for fk in step.filters:
-            if fk in _LOCATOR_IMPORTS:
-                locator_names.add(_LOCATOR_IMPORTS[fk])
+    # Collect element names using set comprehension
+    # Check locator_value and inside[1]
+    element_names = {
+        _ELEMENT_UNDERSCORE.get(val, val)
+        for s in steps
+        for val in [s.locator_value, *(s.inside[1] if s.inside else [])]
+        if val in _ELEMENT_IMPORTS
+    }
 
     all_imports = sorted(locator_names | element_names)
-    if all_imports:
-        return f"from pyshaft import web as w, {', '.join(all_imports)}"
-    return "from pyshaft import web as w"
+    import_line = f", {', '.join(all_imports)}" if all_imports else ""
+    return f"from pyshaft import web as w{import_line}"
 
 
 def _generate_flat_mode(steps: list[RecordedStep]) -> list[str]:
     """Generate code with each action on its own line."""
-    lines: list[str] = []
-    for step in steps:
-        code = _step_to_code(step)
-        lines.append(f"    {code}")
-    return lines
+    return [f"    {_step_to_code(step)}" for step in steps]
 
 
 def _generate_chain_mode(steps: list[RecordedStep]) -> list[str]:
@@ -133,14 +120,33 @@ def _generate_chain_mode(steps: list[RecordedStep]) -> list[str]:
     def flush_chain():
         if not chain:
             return
+        
         if len(chain) == 1:
             lines.append(f"    {_step_to_code(chain[0])}")
         else:
-            # Multi-step chain
-            lines.append(f"    ({_step_to_code(chain[0])}")
-            for s in chain[1:-1]:
-                lines.append(f"     .{_step_to_chain_code(s)}")
-            lines.append(f"     .{_step_to_chain_code(chain[-1])})")
+            # Check if we can fit the whole chain on one line
+            # (Simple heuristic: 2 steps and no multiline args)
+            first_code = _step_to_code(chain[0])
+            rest_codes = [_step_to_chain_code(s) for s in chain[1:]]
+            
+            is_multiline = any("\n" in c for c in [first_code] + rest_codes)
+            total_len = len(first_code) + sum(len(c) + 1 for c in rest_codes)
+            
+            if not is_multiline and total_len < 100:
+                full_line = first_code + "".join(f".{c}" for c in rest_codes)
+                lines.append(f"    {full_line}")
+            else:
+                # Standard multiline chain
+                lines.append(f"    ({first_code}")
+                for i, code in enumerate(rest_codes):
+                    suffix = ")" if i == len(rest_codes) - 1 else ""
+                    # Handle internal newlines (like Aria Snapshots)
+                    if "\n" in code:
+                        # Indent sub-lines of the code itself
+                        indented_code = code.replace("\n", "\n     ")
+                        lines.append(f"     .{indented_code}{suffix}")
+                    else:
+                        lines.append(f"     .{code}{suffix}")
         chain.clear()
 
     for step in steps:
@@ -380,16 +386,20 @@ def _build_action_call(step: RecordedStep) -> str:
 
             # For actions with required text argument (type, select) or assertion strings
             if action in ("type", "pick_date", "upload_file") and step.typed_text is not None:
-                return f'{action}("{step.typed_text}").{step.modifier}({kwarg_key}={py_value})'
+                txt = _format_string(step.typed_text)
+                return f'{action}({txt}).{step.modifier}({kwarg_key}={py_value})'
 
             if action in ("select", "select_dynamic") and step.typed_text:
-                return f'{action}("{step.typed_text}").{step.modifier}({kwarg_key}={py_value})'
+                txt = _format_string(step.typed_text)
+                return f'{action}({txt}).{step.modifier}({kwarg_key}={py_value})'
 
             if action.startswith("assert") and step.assert_expected:
                 if action not in ("assert_title", "assert_url", "assert_contain_title", "assert_contain_url", "assert_snapshot"):
-                    return f'{action}("{step.assert_expected}").{step.modifier}({kwarg_key}={py_value})'
+                    txt = _format_string(step.assert_expected)
+                    return f'{action}({txt}).{step.modifier}({kwarg_key}={py_value})'
                 if action == "assert_snapshot":
-                    return f'{action}("{step.assert_expected}")'
+                    txt = _format_string(step.assert_expected)
+                    return f'{action}({txt})'
 
             # Default modifier chain
             return f'{action}.{step.modifier}({kwarg_key}={py_value})'
@@ -398,7 +408,7 @@ def _build_action_call(step: RecordedStep) -> str:
     
     # Type / Input action: type("text", locator_type, value)
     if action in ("type", "pick_date", "upload_file") and step.typed_text is not None:
-        text_arg = f'"{step.typed_text}"' if not step.typed_text.startswith("data.") else step.typed_text
+        text_arg = step.typed_text if step.typed_text.startswith("data.") else _format_string(step.typed_text)
         if py_type and py_value:
             return f'{action}({text_arg}, {py_type}, {py_value})'
         elif py_value:
@@ -408,8 +418,12 @@ def _build_action_call(step: RecordedStep) -> str:
 
     # Assert with expected value
     if action.startswith("assert") and step.assert_expected:
-        expected = f'"{step.assert_expected}"' if not step.assert_expected.startswith("data.") else step.assert_expected
-        if action in ("assert_title", "assert_url", "assert_contain_title", "assert_contain_url", "assert_snapshot"):
+        if action == "assert_aria_snapshot":
+            expected = _format_string(step.assert_expected, force_single_line=True)
+        else:
+            expected = step.assert_expected if step.assert_expected.startswith("data.") else _format_string(step.assert_expected)
+            
+        if action in ("assert_title", "assert_url", "assert_contain_title", "assert_contain_url"):
             return f'{action}({expected})'
         if py_type and py_value:
             return f'{action}({expected}, {py_type}, {py_value})'
@@ -417,7 +431,7 @@ def _build_action_call(step: RecordedStep) -> str:
 
     # Select action: select("option", locator_type, value)
     if action in ("select", "select_dynamic") and step.typed_text:
-        text_arg = f'"{step.typed_text}"' if not step.typed_text.startswith("data.") else step.typed_text
+        text_arg = step.typed_text if step.typed_text.startswith("data.") else _format_string(step.typed_text)
         if py_type and py_value:
             return f'{action}({text_arg}, {py_type}, {py_value})'
         return f'{action}({text_arg})'
@@ -444,19 +458,16 @@ def _build_modifiers(step: RecordedStep) -> str:
     """Build the modifier chain: .filter().inside().nth()."""
     parts: list[str] = []
 
-    # Filters
+    # Filters using list comprehension
     if step.filters:
-        filter_args = []
-        for k, v in step.filters.items():
-            key = "class_" if k == "class" else k
-            filter_args.append(f'{key}="{v}"')
-        parts.append(f'.filter({", ".join(filter_args)})')
+        args = [f'{"class_" if k == "class" else k}={_format_string(v)}' for k, v in step.filters.items()]
+        parts.append(f'.filter({", ".join(args)})')
 
     # Inside
     if step.inside:
         inside_type, inside_value = step.inside
         py_type = _LOCATOR_IMPORTS.get(inside_type, f'"{inside_type}"')
-        parts.append(f'.inside({py_type}, "{inside_value}")')
+        parts.append(f'.inside({py_type}, {_format_string(inside_value)})')
 
     # Index
     if step.index is not None:
@@ -465,12 +476,22 @@ def _build_modifiers(step: RecordedStep) -> str:
     return "".join(parts)
 
 
+def _format_string(text: str, force_single_line: bool = False) -> str:
+    """Safely format a string for Python code, escaping quotes and handling newlines."""
+    if not text: return '""'
+    import json
+    if force_single_line:
+        # json.dumps handles both " and \n escaping perfectly
+        return json.dumps(text.strip())
+    
+    # If it has newlines and we allow multiline, use triple quotes (not used currently per user request)
+    # but here we follow user's "one line" request for aria snapshots
+    return json.dumps(text.strip())
+
 def _format_value(value: str) -> str:
     """Format a locator value — element constants stay bare, others getting quotes unless from POM."""
     if value in _ELEMENT_IMPORTS:
         return _ELEMENT_UNDERSCORE.get(value, value)
     if value.startswith("page.") or value.startswith("data."):
         return value
-    if value:
-        return f'"{value}"'
-    return ""
+    return _format_string(value)

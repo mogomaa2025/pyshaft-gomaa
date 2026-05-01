@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGridLayout, QRadioButton, QButtonGroup, QLineEdit,
     QInputDialog, QGraphicsDropShadowEffect, QWidget,
-    QApplication, QScrollArea, QSizePolicy,
+    QApplication, QScrollArea, QSizePolicy, QFileDialog, QMessageBox,
 )
 
 from pyshaft.recorder.models import RecordedStep, LocatorSuggestion
@@ -52,6 +52,7 @@ _QUICK_ASSERTIONS = [
     ("assert_checked",      ICONS["check"],    "Checked"),
     ("assert_contain_text", "⊃Aa",            "Contains…"),
     ("assert_snapshot",     ICONS["snapshot"], "Snapshot"),
+    ("assert_aria_snapshot", "📐",              "Aria Snap"),
     ("wait_disappear",      "⌛✕",             "Wait Disappear"),
     ("assert_selected_option", ICONS["dropdown"], "▼= Option"),
     ("assert_contain_selected", ICONS["dropdown"], "▼⊃ Option"),
@@ -67,14 +68,11 @@ _QUICK_EXTRACTIONS = [
 ]
 
 
-class ElementActionPopup(QFrame):
-    """Floating popup for choosing an action/assertion on a selected element.
-
-    Appears at cursor position.  The user picks a locator strategy, optional
-    modifier, then clicks an action or assertion button to create a step.
-    """
+class ElementActionPopup(QWidget):
+    """Floating popup for choosing an action/assertion on a selected element."""
 
     step_requested = pyqtSignal(object)  # RecordedStep
+    snapshot_capture_requested = pyqtSignal(str, object)  # (name, element_meta)
     dismissed = pyqtSignal()
 
     # ── construction ──────────────────────────────────────────────────────
@@ -86,9 +84,9 @@ class ElementActionPopup(QFrame):
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-        self.setMinimumWidth(390)
-        self.setMaximumHeight(520)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setMinimumWidth(460)  # Width + shadow margins
+        self.setMaximumHeight(650)
 
         self._element_meta: dict = {}
         self._locator_suggestions: list[LocatorSuggestion] = []
@@ -99,13 +97,34 @@ class ElementActionPopup(QFrame):
         self._build_ui()
         self._apply_shadow()
 
-    # ── UI construction ───────────────────────────────────────────────────
+        self._drag_pos = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        event.accept()
 
     def _build_ui(self):
-        self.setObjectName("element_popup")
-        self.setStyleSheet(self._popup_stylesheet())
+        # Top level layout on self (the invisible window)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(20, 20, 20, 20) # Space for shadow
 
-        root = QVBoxLayout(self)
+        # The actual styled card
+        self._container = QFrame()
+        self._container.setObjectName("element_popup")
+        self._container.setStyleSheet(self._popup_stylesheet())
+        outer_layout.addWidget(self._container)
+
+        root = QVBoxLayout(self._container)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
@@ -113,8 +132,13 @@ class ElementActionPopup(QFrame):
         header = QFrame()
         header.setObjectName("popup_header")
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(14, 10, 14, 10)
+        hl.setContentsMargins(12, 10, 12, 10)
         hl.setSpacing(8)
+
+        # Icon for the inspected element
+        tag_icon = QLabel(ICONS.get("inspect", "🔍"))
+        tag_icon.setStyleSheet(f"font-size: 14px; color: {COLORS['accent_purple']};")
+        hl.addWidget(tag_icon)
 
         self._tag_label = QLabel("element")
         self._tag_label.setObjectName("popup_tag")
@@ -123,10 +147,17 @@ class ElementActionPopup(QFrame):
         self._loc_preview = QLabel("")
         self._loc_preview.setObjectName("popup_loc_preview")
         self._loc_preview.setStyleSheet(
-            f"color:{COLORS['accent_green']};font-family:{FONTS['family_mono']};"
-            f"font-size:{FONTS['size_sm']};"
+            f"color:{COLORS['text_muted']}; font-family:{FONTS['family_mono']};"
+            f"font-size: 10px; margin-left: 4px;"
         )
+        self._loc_preview.setToolTip("Best locator strategy")
         hl.addWidget(self._loc_preview, 1)
+
+        # Drag handle indicator
+        drag_hint = QLabel("⋮⋮")
+        drag_hint.setStyleSheet(f"color: {COLORS['border_light']}; font-size: 16px; margin-right: 2px;")
+        drag_hint.setToolTip("Drag to move")
+        hl.addWidget(drag_hint)
 
         close_btn = QPushButton("✕")
         close_btn.setFixedSize(22, 22)
@@ -141,24 +172,34 @@ class ElementActionPopup(QFrame):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("background:transparent;")
+        scroll.setStyleSheet("background: transparent; border: none;")
 
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(14, 8, 14, 12)
-        body_layout.setSpacing(10)
+        body_layout.setContentsMargins(16, 12, 16, 16)
+        body_layout.setSpacing(14)
 
         # ── Locator choices ───────────────────────────────────────────────
-        loc_section = self._section_label("LOCATOR")
-        body_layout.addWidget(loc_section)
+        loc_container = QFrame()
+        loc_container.setObjectName("inner_card")
+        loc_layout = QVBoxLayout(loc_container)
+        loc_layout.setContentsMargins(12, 10, 12, 10)
+        loc_layout.setSpacing(6)
+
+        loc_header = QHBoxLayout()
+        loc_header.addWidget(self._section_label("LOCATOR STRATEGY"))
+        loc_header.addStretch()
+        loc_layout.addLayout(loc_header)
 
         self._loc_radio_group = QButtonGroup(self)
-        self._loc_container = QVBoxLayout()
-        self._loc_container.setSpacing(2)
+        self._loc_radios_layout = QVBoxLayout()
+        self._loc_radios_layout.setSpacing(2)
         self._loc_radios: list[QRadioButton] = []
-        body_layout.addLayout(self._loc_container)
+        loc_layout.addLayout(self._loc_radios_layout)
+        
+        body_layout.addWidget(loc_container)
 
-        # ── Modifier chips ────────────────────────────────────────────────
+        # ── Modifier chips & nth ──────────────────────────────────────────
         mod_row = QHBoxLayout()
         mod_row.setSpacing(6)
         self._modifier_buttons: dict[str, QPushButton] = {}
@@ -166,62 +207,59 @@ class ElementActionPopup(QFrame):
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setObjectName("mod_chip")
+            btn.setFixedWidth(64)
             btn.clicked.connect(partial(self._on_modifier, mod_id))
             mod_row.addWidget(btn)
             self._modifier_buttons[mod_id] = btn
-        # nth
+        
+        mod_row.addSpacing(10)
         nth_lbl = QLabel("nth:")
-        nth_lbl.setStyleSheet(f"color:{COLORS['text_muted']};font-size:{FONTS['size_sm']};")
+        nth_lbl.setStyleSheet(f"color:{COLORS['text_muted']}; font-size: 11px; font-weight: bold;")
         mod_row.addWidget(nth_lbl)
+        
         self._nth_input = QLineEdit()
         self._nth_input.setPlaceholderText("—")
-        self._nth_input.setFixedWidth(36)
+        self._nth_input.setFixedWidth(32)
         self._nth_input.setObjectName("nth_input")
         self._nth_input.textChanged.connect(self._on_nth_changed)
         mod_row.addWidget(self._nth_input)
         mod_row.addStretch()
         body_layout.addLayout(mod_row)
 
-        # ── Divider ──────────────────────────────────────────────────────
-        body_layout.addWidget(self._divider())
-
         # ── Actions ───────────────────────────────────────────────────────
-        body_layout.addWidget(self._section_label("ACTIONS"))
+        body_layout.addWidget(self._section_label(f"{ICONS['click']}  ACTIONS"))
         act_grid = QGridLayout()
-        act_grid.setSpacing(4)
+        act_grid.setSpacing(6)
         for i, (aid, icon, label) in enumerate(_QUICK_ACTIONS):
             btn = QPushButton(f"{icon} {label}")
             btn.setObjectName("act_btn")
+            btn.setFixedHeight(28)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(partial(self._on_action, aid))
             act_grid.addWidget(btn, i // 2, i % 2)
         body_layout.addLayout(act_grid)
 
-        # ── Divider ──────────────────────────────────────────────────────
-        body_layout.addWidget(self._divider())
-
         # ── Assertions ────────────────────────────────────────────────────
-        body_layout.addWidget(self._section_label("ASSERTIONS"))
+        body_layout.addWidget(self._section_label(f"{ICONS['assert']}  ASSERTIONS"))
         ass_grid = QGridLayout()
-        ass_grid.setSpacing(4)
+        ass_grid.setSpacing(6)
         for i, (aid, icon, label) in enumerate(_QUICK_ASSERTIONS):
             btn = QPushButton(f"{icon} {label}")
             btn.setObjectName("ass_btn")
+            btn.setFixedHeight(28)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(partial(self._on_assert, aid))
             ass_grid.addWidget(btn, i // 2, i % 2)
         body_layout.addLayout(ass_grid)
 
-        # \u2500\u2500 Divider \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-        body_layout.addWidget(self._divider())
-
-        # \u2500\u2500 Data Extraction \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-        body_layout.addWidget(self._section_label("DATA EXTRACTION"))
+        # ── Data Extraction ───────────────────────────────────────────────
+        body_layout.addWidget(self._section_label(f"{ICONS['extract']}  EXTRACTION"))
         ext_grid = QGridLayout()
-        ext_grid.setSpacing(4)
+        ext_grid.setSpacing(6)
         for i, (eid, icon, label) in enumerate(_QUICK_EXTRACTIONS):
             btn = QPushButton(f"{icon} {label}")
             btn.setObjectName("ext_btn")
+            btn.setFixedHeight(28)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(partial(self._on_extract, eid))
             ext_grid.addWidget(btn, i // 2, i % 2)
@@ -231,14 +269,23 @@ class ElementActionPopup(QFrame):
         scroll.setWidget(body)
         root.addWidget(scroll)
 
-    # ── helpers ────────────────────────────────────────────────────────────
+    def _apply_shadow(self):
+        from PyQt6.QtGui import QColor
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 160))
+        # Apply shadow to the CONTAINER frame, not the window itself
+        # This fixes the Windows UpdateLayeredWindowIndirect error
+        self._container.setGraphicsEffect(shadow)
 
     @staticmethod
     def _section_label(text: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setStyleSheet(
-            f"color:{COLORS['text_muted']};font-size:{FONTS['size_xs']};"
-            f"font-weight:700;letter-spacing:1px;padding:2px 0;"
+            f"color:{COLORS['text_muted']}; font-size: 9px; font-weight: 800; "
+            f"letter-spacing: 1.2px; text-transform: uppercase; padding-top: 4px;"
         )
         return lbl
 
@@ -246,17 +293,10 @@ class ElementActionPopup(QFrame):
     def _divider() -> QFrame:
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet(f"color:{COLORS['border']};")
+        line.setStyleSheet(f"background-color:{COLORS['border']}; border: none;")
         line.setFixedHeight(1)
         return line
 
-    def _apply_shadow(self):
-        from PyQt6.QtGui import QColor
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(28)
-        shadow.setOffset(0, 6)
-        shadow.setColor(QColor(0, 0, 0, 120))
-        self.setGraphicsEffect(shadow)
 
     # ── public API ─────────────────────────────────────────────────────────
 
@@ -346,7 +386,7 @@ class ElementActionPopup(QFrame):
             radio.toggled.connect(partial(self._on_locator_selected, i))
             self._loc_radio_group.addButton(radio)
             self._loc_radios.append(radio)
-            self._loc_container.addWidget(radio)
+            self._loc_radios_layout.addWidget(radio)
 
     # ── event handlers ────────────────────────────────────────────────────
 
@@ -408,7 +448,9 @@ class ElementActionPopup(QFrame):
                 return
             step.typed_text = text
         elif action_id == "select":
-            text, ok = QInputDialog.getText(self, "Select Option", "Enter option value:")
+            text, ok = QInputDialog.getText(
+                self, "Select Option", "Enter option text, value, or index:"
+            )
             if not ok:
                 return
             step.typed_text = text
@@ -440,7 +482,7 @@ class ElementActionPopup(QFrame):
         elif assert_id in ("assert_selected_option", "assert_contain_selected"):
             default = self._element_meta.get("selected_text", "")
             text, ok = QInputDialog.getText(
-                self, "Expected Option", "Enter expected option text:", text=default
+                self, "Expected Option", "Enter expected option text, value, or index:", text=default
             )
             if not ok:
                 return
@@ -454,6 +496,44 @@ class ElementActionPopup(QFrame):
             if not ok:
                 return
             step.assert_data_type_name = dtype
+        elif assert_id == "assert_snapshot":
+            from pathlib import Path
+            # Try to find existing snapshots to help the user
+            base_dir = Path("saved_snapshots")
+            existing = []
+            if base_dir.exists():
+                existing = [f.stem for f in base_dir.glob("*.png")]
+            
+            msg = "Select a snapshot baseline or 'Browse...' to pick a file:"
+            choices = ["Browse..."] + sorted(existing)
+            
+            choice, ok = QInputDialog.getItem(self, "Assert Snapshot", msg, choices, 0, True)
+            if not ok: return
+            
+            if choice == "Browse...":
+                path, _ = QFileDialog.getOpenFileName(self, "Select baseline file", str(base_dir), "Images (*.png)")
+                if not path: return
+                step.assert_expected = Path(path).stem
+            else:
+                step.assert_expected = choice
+                # Request immediate capture for this element if it's a new name or even if existing
+                self.snapshot_capture_requested.emit(step.assert_expected, self._element_meta)
+        elif assert_id == "assert_aria_snapshot":
+            from pyshaft.web import aria
+            try:
+                tree = self._element_meta.get("aria_tree") or {}
+                yaml_text = aria.tree_to_yaml(tree)
+                
+                text, ok = QInputDialog.getMultiLineText(
+                    self, "Aria Snapshot", 
+                    "Confirm or edit the semantic structure (YAML):",
+                    text=yaml_text
+                )
+                if not ok: return
+                step.assert_expected = text
+            except Exception as e:
+                QMessageBox.warning(self, "Aria Error", f"Failed to capture Aria Tree: {e}")
+                return
         elif assert_id == "assert_value":
             default = self._element_meta.get("value", "")
             text, ok = QInputDialog.getText(
@@ -512,61 +592,72 @@ class ElementActionPopup(QFrame):
         return f"""
         QFrame#element_popup {{
             background-color: {c['bg_medium']};
-            border: 1px solid {c['accent_purple']};
+            border: 1px solid {c['accent_purple']}AA;
             border-radius: 12px;
         }}
 
         /* ── header ── */
         QFrame#popup_header {{
-            background-color: {c['bg_dark']};
-            border-top-left-radius: 12px;
-            border-top-right-radius: 12px;
+            background-color: {c['bg_darkest']};
+            border-top-left-radius: 11px;
+            border-top-right-radius: 11px;
             border-bottom: 1px solid {c['border']};
         }}
         QLabel#popup_tag {{
             color: {c['accent_blue']};
-            font-family: {f['family_mono']};
-            font-size: {f['size_md']};
-            font-weight: 700;
+            font-family: {f['family_ui']};
+            font-size: 13px;
+            font-weight: 800;
         }}
         QPushButton#popup_close {{
-            background: transparent;
-            color: {c['text_muted']};
-            border: none;
-            font-size: 13px;
-            border-radius: 11px;
+            background-color: {c['bg_card']};
+            color: {c['text_primary']};
+            border: 1px solid {c['border']};
+            font-size: 11px;
+            font-weight: bold;
+            border-radius: 4px;
         }}
         QPushButton#popup_close:hover {{
             background-color: {c['accent_red']};
             color: #FFFFFF;
+            border-color: {c['accent_red']};
+        }}
+
+        /* ── inner card (locator strategy) ── */
+        QFrame#inner_card {{
+            background-color: {c['bg_darkest']}CC;
+            border: 1px solid {c['border']};
+            border-radius: 8px;
         }}
 
         /* ── modifier chips ── */
         QPushButton#mod_chip {{
-            background-color: {c['bg_card']};
+            background-color: {c['bg_light']};
             border: 1px solid {c['border']};
             border-radius: 4px;
-            padding: 3px 10px;
-            font-size: {f['size_sm']};
+            padding: 4px 8px;
+            font-size: 11px;
+            font-weight: 600;
             color: {c['text_secondary']};
         }}
         QPushButton#mod_chip:checked {{
             background-color: {c['accent_purple_dim']};
             border-color: {c['accent_purple']};
-            color: {c['text_primary']};
+            color: #FFFFFF;
         }}
-        QPushButton#mod_chip:hover {{
+        QPushButton#mod_chip:hover:!checked {{
+            background-color: {c['bg_hover']};
             border-color: {c['border_light']};
         }}
 
         /* ── nth input ── */
         QLineEdit#nth_input {{
-            background-color: {c['bg_card']};
+            background-color: {c['bg_darkest']};
             border: 1px solid {c['border']};
             border-radius: 4px;
-            padding: 3px 6px;
-            font-size: {f['size_sm']};
-            color: {c['text_primary']};
+            padding: 2px 6px;
+            font-size: 12px;
+            color: {c['accent_green']};
             font-family: {f['family_mono']};
         }}
         QLineEdit#nth_input:focus {{
@@ -575,43 +666,50 @@ class ElementActionPopup(QFrame):
 
         /* ── action buttons ── */
         QPushButton#act_btn {{
-            background-color: {c['bg_card']};
+            background-color: {c['bg_light']};
             border: 1px solid {c['border']};
-            border-radius: 5px;
-            padding: 5px 4px;
-            font-size: {f['size_sm']};
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            text-align: left;
             color: {c['text_primary']};
         }}
         QPushButton#act_btn:hover {{
-            background-color: {c['accent_purple_dim']};
+            background-color: {c['bg_hover']};
             border-color: {c['accent_purple']};
         }}
 
         /* ── assertion buttons ── */
         QPushButton#ass_btn {{
-            background-color: {c['bg_card']};
+            background-color: {c['bg_light']};
             border: 1px solid {c['border']};
-            border-radius: 5px;
-            padding: 5px 4px;
-            font-size: {f['size_sm']};
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            text-align: left;
             color: {c['text_primary']};
         }}
         QPushButton#ass_btn:hover {{
-            background-color: {c['accent_green_dim']};
+            background-color: {c['bg_hover']};
             border-color: {c['accent_green']};
         }}
 
         /* ── extraction buttons ── */
         QPushButton#ext_btn {{
-            background-color: {c['bg_card']};
+            background-color: {c['bg_light']};
             border: 1px solid {c['border']};
-            border-radius: 5px;
-            padding: 5px 4px;
-            font-size: {f['size_sm']};
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            text-align: left;
             color: {c['text_primary']};
         }}
         QPushButton#ext_btn:hover {{
-            background-color: {c['accent_orange']}22;
+            background-color: {c['bg_hover']};
             border-color: {c['accent_orange']};
         }}
         """
+

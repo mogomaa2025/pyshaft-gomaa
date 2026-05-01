@@ -83,3 +83,56 @@ def clear_session_storage() -> None:
         driver.execute_script("window.sessionStorage.clear();")
 
     run_driver_action("clear_session_storage", "sessionStorage", _clear)
+
+
+def get_cookies() -> list[dict]:
+    """Get all browser cookies."""
+    from pyshaft.session import session_context
+    return session_context.driver.get_cookies()
+
+
+def add_cookie(cookie_dict: dict) -> None:
+    """Add a cookie to the current session."""
+    def _add(driver: WebDriver) -> None:
+        driver.add_cookie(cookie_dict)
+
+    run_driver_action("add_cookie", str(cookie_dict), _add)
+
+
+def delete_cookie(name: str) -> None:
+    """Delete a specific cookie by name."""
+    def _delete(driver: WebDriver) -> None:
+        driver.delete_cookie(name)
+
+    run_driver_action("delete_cookie", name, _delete)
+
+
+def clear_cookies() -> None:
+    """Delete all cookies from the current session."""
+    def _clear(driver: WebDriver) -> None:
+        driver.delete_all_cookies()
+
+    run_driver_action("clear_cookies", "all cookies", _clear)
+
+
+def save_cookies(file_path: str) -> None:
+    """Save current session cookies to a JSON file."""
+    import json
+    cookies = get_cookies()
+    with open(file_path, "w") as f:
+        json.dump(cookies, f)
+    logger.info("Cookies saved to %s", file_path)
+
+
+def load_cookies(file_path: str) -> None:
+    """Load cookies from a JSON file and add them to the current session."""
+    import json
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Cookie file not found: {file_path}")
+    
+    with open(file_path, "r") as f:
+        cookies = json.load(f)
+        
+    for cookie in cookies:
+        add_cookie(cookie)
+    logger.info("Cookies loaded from %s", file_path)

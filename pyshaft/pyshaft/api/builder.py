@@ -152,19 +152,18 @@ class RequestBuilder:
         if not self._loop_key or self._loop_values is None:
             raise ValueError("No data provided via with_data()")
         
-        responses = []
         import copy
         original_body = copy.deepcopy(self._body) if self._body is not None else {}
         
-        for val in self._loop_values:
+        def run_once(val):
             if not isinstance(self._body, dict): self._body = {}
             self._body[self._loop_key] = val
             resp = self.perform()
             callback(resp)
-            responses.append(resp)
             self._body = copy.deepcopy(original_body)
-            
-        return responses
+            return resp
+
+        return [run_once(val) for val in self._loop_values]
 
     def perform(self) -> ApiResponse:
         """Execute the request, resolve placeholders, and cache the response."""
@@ -178,14 +177,14 @@ class RequestBuilder:
             """Recursively resolve {{var}} placeholders."""
             if isinstance(val, str):
                 # Match entire string if it's just {{var}} to preserve types (int/float)
-                match = re.fullmatch(r"\{\{\s*(\w+)\s*\}\}", val)
+                match = re.fullmatch(r"\{\{\s*([\w-]+)\s*\}\}", val)
                 if match:
                     try: return get_stored(match.group(1))
                     except KeyError: return val
                 
                 # Otherwise do partial string replacement
                 res = val
-                pattern = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+                pattern = re.compile(r"\{\{\s*([\w-]+)\s*\}\}")
                 for match in pattern.finditer(val):
                     key = match.group(1)
                     try:
@@ -207,8 +206,22 @@ class RequestBuilder:
         
         # 2. Build Call
         call_kwargs = {**self._kwargs}
-        if self._params: call_kwargs["params"] = self._params
-        if self._headers: call_kwargs["headers"] = self._headers
+        
+        # Merge all parameters into URL to prevent httpx from stripping existing ones
+        import httpx
+        url_obj = httpx.URL(self._url)
+        if self._params:
+            url_obj = url_obj.copy_merge_params(self._params)
+        if "params" in call_kwargs:
+            url_obj = url_obj.copy_merge_params(call_kwargs.pop("params"))
+        self._url = str(url_obj)
+
+        # Merge headers
+        if self._headers:
+            if "headers" in call_kwargs:
+                call_kwargs["headers"].update(self._headers)
+            else:
+                call_kwargs["headers"] = self._headers
 
         match self._method:
             case "GET":
@@ -265,9 +278,22 @@ class RequestBuilder:
         self._ensure_performed().assert_json_in_array(path, criteria)
         return self
 
-    def prettify(self) -> RequestBuilder:
-        """Execute and print the pretty response body."""
-        self._ensure_performed().prettify()
+    def assert_schema(self, schema: dict, path: str = "$") -> RequestBuilder:
+        self._ensure_performed().assert_schema(schema, path=path)
+        return self
+
+    def assert_partial_schema(self, schema: dict, ignore_keys: list[str], path: str = "$") -> RequestBuilder:
+        self._ensure_performed().assert_partial_schema(schema, ignore_keys, path=path)
+        return self
+
+    def prettify(self, verbose: bool = True, max_length: int = 2000) -> RequestBuilder:
+        """Execute and print the pretty response body.
+        
+        Args:
+            verbose: If False, only show status and summary (default: True)
+            max_length: Truncate output longer than this (default: 2000 chars)
+        """
+        self._ensure_performed().prettify(verbose=verbose, max_length=max_length)
         return self
 
     def extract_json(self, path: str, key: str) -> RequestBuilder:

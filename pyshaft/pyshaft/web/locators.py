@@ -11,9 +11,66 @@ from __future__ import annotations
 
 import logging
 import re
+import inspect
+from functools import wraps
 from typing import Any
 
 logger = logging.getLogger("pyshaft.web.locators")
+
+def chainable(engine_method_name: str | None = None):
+    """Decorator to enable seamless chaining of Locator and WebEngine actions.
+    
+    If locator-specific arguments (locator_type, value, filters) are provided,
+    it executes any pending action on the current Locator and forwards the call
+    to the WebEngine to start a new action chain.
+    Otherwise, it executes any pending action and sets the new action on the current Locator.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            # Always flush the previous action if we are applying a new one
+            self.execute()
+            
+            sig = inspect.signature(func)
+            bound = sig.bind(self, *args, **kwargs)
+            bound.apply_defaults()
+            
+            loc_type = bound.arguments.get("locator_type")
+            val = bound.arguments.get("value")
+            # The kwargs parameter might be named 'filters' or 'kwargs'
+            var_kwargs_name = None
+            for param in sig.parameters.values():
+                if param.kind == inspect.Parameter.VAR_KEYWORD:
+                    var_kwargs_name = param.name
+                    break
+            
+            filters = bound.arguments.get(var_kwargs_name, {}) if var_kwargs_name else {}
+            
+            # If targeting a new element, forward to WebEngine
+            if loc_type or val or filters:
+                method_name = engine_method_name or func.__name__
+                engine_method = getattr(self._web_instance, method_name)
+                
+                kwargs_to_pass = {}
+                for k, v in bound.arguments.items():
+                    if k == "self": continue
+                    if k == var_kwargs_name:
+                        kwargs_to_pass.update(v)
+                    else:
+                        kwargs_to_pass[k] = v
+                        
+                return engine_method(**kwargs_to_pass)
+            
+            # Otherwise, apply action to the current Locator
+            res = func(self, *args, **kwargs)
+            
+            # Auto-flush if this was a terminal action (it set a pending locator)
+            if self._web_instance and self._web_instance._pending_locator == self:
+                self._web_instance.flush()
+                
+            return res
+        return wrapper
+    return decorator
 
 
 class Locator:
@@ -118,6 +175,12 @@ class Locator:
             if self._action == "click":
                 from pyshaft.web.interactions import click
                 click(selector, amount=self._action_args.get("amount", 1))
+            elif self._action == "double_click":
+                from pyshaft.web.interactions import double_click
+                double_click(selector)
+            elif self._action == "right_click":
+                from pyshaft.web.interactions import right_click
+                right_click(selector)
             elif self._action == "type":
                 from pyshaft.web.inputs import type_text
                 type_text(selector, self._action_args.get("text", ""), 
@@ -140,6 +203,15 @@ class Locator:
             elif self._action == "select":
                 from pyshaft.web.inputs import select_option
                 select_option(selector, self._action_args.get("value"))
+            elif self._action == "select_options":
+                from pyshaft.web.inputs import select_options
+                select_options(selector, self._action_args.get("values", []))
+            elif self._action == "deselect_option":
+                from pyshaft.web.inputs import deselect_option
+                deselect_option(selector, self._action_args.get("value"))
+            elif self._action == "deselect_all_options":
+                from pyshaft.web.inputs import deselect_all_options
+                deselect_all_options(selector)
             elif self._action == "select_dynamic":
                 from pyshaft.web.interactions import click
                 click(selector)
@@ -156,16 +228,24 @@ class Locator:
             elif self._action == "upload_file":
                 from pyshaft.web.inputs import upload_file
                 upload_file(selector, self._action_args.get("file_path", ""))
+            elif self._action == "upload_files":
+                from pyshaft.web.inputs import upload_files
+                upload_files(selector, self._action_args.get("file_paths", []))
+            elif self._action == "enter_mfa_code":
+                from pyshaft.web.inputs import enter_mfa_code
+                enter_mfa_code(selector, self._action_args.get("totp_key", ""))
             elif self._action == "remove_element":
                 from pyshaft.web.js_helpers import remove_element
                 remove_element(selector)
+            elif self._action == "remove_elements":
+                from pyshaft.web.js_helpers import remove_elements
+                remove_elements(selector)
             elif self._action == "switch_to_iframe":
-                from pyshaft.core.action_runner import run_driver_action
-                from pyshaft.core.locator import DualLocator
-                def _switch(driver):
-                    el = DualLocator.resolve(driver, selector)
-                    driver.switch_to.frame(el)
-                run_driver_action("switch_to_iframe", selector, _switch)
+                from pyshaft.web.navigation import switch_to_frame
+                switch_to_frame(selector)
+            elif self._action == "drag_by_offset":
+                from pyshaft.web.interactions import drag_by_offset
+                drag_by_offset(selector, self._action_args.get("x", 0), self._action_args.get("y", 0))
             elif self._action == "assert_text":
                 from pyshaft.web.assertions import assert_text
                 assert_text(selector, self._action_args.get("expected"), 
@@ -385,7 +465,192 @@ class Locator:
         """Target the last element."""
         return self.nth(-1)
 
+    def shadow(self, selector: str) -> "Locator":
+        """Target an element within shadow DOM.
+
+        Example:
+            w.wait().shadow("button.primary").visible()
+        """
+        new_loc = Locator(value=f"shadow > {selector}")
+        new_loc._web_instance = self
+        return new_loc
+
+    # -------------------------------------------------------------------------
+    # Action Methods (Terminal)
+    # -------------------------------------------------------------------------
+
+    @chainable()
+    def click(
+        self,
+        locator_type: str | None = None,
+        value: str = "",
+        amount: int = 1,
+        **filters: Any,
+    ) -> "Locator":
+        """Set pending click action. If locator info provided, starts a new action."""
+        self._action = "click"
+        self._action_args = {"amount": amount}
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    @chainable()
+    def double_click(
+        self,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "Locator":
+        """Set pending double_click action."""
+        self._action = "double_click"
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    @chainable()
+    def right_click(
+        self,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "Locator":
+        """Set pending right_click action."""
+        self._action = "right_click"
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    @chainable()
+    def type(
+        self,
+        text: str,
+        locator_type: str | None = None,
+        value: str = "",
+        clear_first: bool = True,
+        **filters: Any,
+    ) -> "Locator":
+        """Set pending type action."""
+        self._action = "type"
+        self._action_args = {"text": text, "clear_first": clear_first}
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    @chainable()
+    def fill(self, text: str, **kwargs) -> "Locator":
+        """Alias for type."""
+        return self.type(text, **kwargs)
+
+    @chainable()
+    def clear(
+        self,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "Locator":
+        """Set pending clear action."""
+        self._action = "clear"
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    @chainable()
+    def hover(
+        self,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "Locator":
+        """Set pending hover action."""
+        self._action = "hover"
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    @chainable()
+    def check(
+        self,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "Locator":
+        """Set pending check action."""
+        self._action = "check"
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    @chainable()
+    def uncheck(
+        self,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "Locator":
+        """Set pending uncheck action."""
+        self._action = "uncheck"
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    @chainable()
+    def select(
+        self,
+        option: str | int,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "Locator":
+        """Set pending select action."""
+        self._action = "select"
+        self._action_args = {"value": option}
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    @chainable()
+    def should_match_snapshot(self, name: str) -> "Locator":
+        """Assert visual layout of the element matches a baseline snapshot."""
+        self._action = "assert_snapshot"
+        self._action_args = {"name": name}
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    @chainable()
+    def should_match_aria_snapshot(self, expected_yaml: str) -> "Locator":
+        """Assert semantic structure matches expected ARIA YAML."""
+        self._action = "assert_aria_snapshot"
+        self._action_args = {"expected_yaml": expected_yaml}
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    def drag_by_offset(self, x: int, y: int) -> "Locator":
+        """Set pending drag_by_offset action."""
+        self._action = "drag_by_offset"
+        self._action_args = {"x": x, "y": y}
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    def enter_mfa_code(self, totp_key: str) -> "Locator":
+        """Set pending enter_mfa_code action."""
+        self._action = "enter_mfa_code"
+        self._action_args = {"totp_key": totp_key}
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
+    def remove(self) -> "Locator":
+        """Set pending remove action."""
+        self._action = "remove_element"
+        if self._web_instance:
+            self._web_instance._pending_locator = self
+        return self
+
     def debug(self) -> "Locator":
+
         """Enable debug mode - highlights element and logs info."""
         new_loc = Locator(
             locator_type=self._locator_type,
@@ -594,15 +859,19 @@ class Locator:
         # Ignore dunder methods to avoid strange inspection behaviors
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(f"'Locator' object has no attribute '{name}'")
-            
+
         # Proxy to web engine for fluent chaining across entire API
         if self._web_instance and hasattr(self._web_instance, name):
-            # Accessing an action on WebEngine will allow syntax like:
-            # w.click(role, button).type("hello")
-            return getattr(self._web_instance, name)
-            
-        raise AttributeError(f"'Locator' object has no attribute '{name}'")
+            attr = getattr(self._web_instance, name)
+            if callable(attr):
+                # We return a wrapper that flushes the current locator before executing the next command
+                def _wrapper(*args, **kwargs):
+                    self.execute()
+                    return attr(*args, **kwargs)
+                return _wrapper
+            return attr
 
+        raise AttributeError(f"'Locator' object has no attribute '{name}'")
 
 # -------------------------------------------------------------------------
 # Factory functions for new unified syntax

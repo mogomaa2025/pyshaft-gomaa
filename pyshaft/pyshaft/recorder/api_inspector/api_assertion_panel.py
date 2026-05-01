@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtWidgets import (
@@ -153,12 +154,22 @@ class ApiAssertionForm(QScrollArea):
         self._path_input.setText(path)
         if value is not None:
             self._expected_input.setText(str(value))
-            if isinstance(value, int):
-                idx = self._type_combo.findData(AssertionType.JSON_PATH_EQUALS)
-                if idx >= 0: self._type_combo.setCurrentIndex(idx)
+            
+            # Smart type selection
+            target_type = AssertionType.JSON_PATH_EQUALS
+            
+            if isinstance(value, bool) or value is None:
+                target_type = AssertionType.JSON_PATH_EQUALS
             elif isinstance(value, str):
-                idx = self._type_combo.findData(AssertionType.JSON_PATH_CONTAINS)
-                if idx >= 0: self._type_combo.setCurrentIndex(idx)
+                if re.match(r"^\d{4}-\d{2}-\d{2}", value):
+                    target_type = AssertionType.JSON_PATH_DATE
+                elif re.match(r"^[a-f0-9-]{36}$", value):
+                    target_type = AssertionType.JSON_PATH_UUID
+                else:
+                    target_type = AssertionType.JSON_PATH_CONTAINS
+            
+            idx = self._type_combo.findData(target_type)
+            if idx >= 0: self._type_combo.setCurrentIndex(idx)
 
     def load_data(self, assertions: list[ApiAssertion]) -> None:
         self._list.clear()

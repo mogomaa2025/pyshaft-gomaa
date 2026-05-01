@@ -107,6 +107,12 @@ class WebEngine:
         loc._web_instance = self
         return loc
 
+    def shadow(self, selector: str) -> "locators.Locator":
+        """Find element within shadow DOM."""
+        loc = locators.Locator(value=f"shadow > {selector}")
+        loc._web_instance = self
+        return loc
+
     def reset(self) -> "WebEngine":
         """Reset configuration (retry, step, etc.)."""
         self.flush()  # Ensure all pending actions are done
@@ -199,6 +205,74 @@ class WebEngine:
         navigation.scroll_to_bottom()
         return self
 
+    def scroll_to_top(self) -> "WebEngine":
+        """Scroll to the top of the page."""
+        navigation.scroll_to_top()
+        return self
+
+    def ad_block(self) -> "WebEngine":
+        """Block common ads on the current page."""
+        js_helpers.ad_block()
+        return self
+
+    def switch_to_new_window(self, switch_to: bool = True) -> "WebEngine":
+        """Open a new browser window/tab."""
+        navigation.open_new_window(switch_to=switch_to)
+        return self
+
+    def switch_to_window(self, handle_or_index: str | int) -> "WebEngine":
+        """Switch focus to a different browser window/tab."""
+        navigation.switch_to_window(handle_or_index)
+        return self
+
+    def switch_to_newest_window(self) -> "WebEngine":
+        """Switch focus to the most recently opened window/tab."""
+        navigation.switch_to_newest_window()
+        return self
+
+    def switch_to_parent_frame(self) -> "WebEngine":
+        """Switch focus back to the parent frame."""
+        navigation.switch_to_parent_frame()
+        return self
+
+    def switch_to_default_content(self) -> "WebEngine":
+        """Switch focus back to the main document/top-level frame."""
+        navigation.switch_to_default_content()
+        return self
+
+    # -------------------------------------------------------------------------
+    # Storage & Cookie Methods
+    # -------------------------------------------------------------------------
+
+    def get_cookies(self) -> list[dict]:
+        """Get all browser cookies."""
+        return storage.get_cookies()
+
+    def add_cookie(self, cookie_dict: dict) -> "WebEngine":
+        """Add a cookie to the current session."""
+        storage.add_cookie(cookie_dict)
+        return self
+
+    def delete_cookie(self, name: str) -> "WebEngine":
+        """Delete a specific cookie by name."""
+        storage.delete_cookie(name)
+        return self
+
+    def clear_cookies(self) -> "WebEngine":
+        """Delete all cookies from the current session."""
+        storage.clear_cookies()
+        return self
+
+    def save_cookies(self, file_path: str) -> "WebEngine":
+        """Save current session cookies to a JSON file."""
+        storage.save_cookies(file_path)
+        return self
+
+    def load_cookies(self, file_path: str) -> "WebEngine":
+        """Load cookies from a JSON file and add them to the session."""
+        storage.load_cookies(file_path)
+        return self
+
     def get_url(self) -> str:
         """Get the current page URL."""
         return navigation.get_url()
@@ -237,7 +311,9 @@ class WebEngine:
         loc, amount = self._build_loc(locator_type, value, third_arg=amount, **filters)
         loc._action = "click"
         loc._action_args = {"amount": amount or 1, "force": filters.get("force", False)}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def force_click(self, locator_type: str | None = None, value: str = "", **filters: Any) -> "locators.Locator":
         """Force-click an element via JavaScript bypass."""
@@ -266,7 +342,9 @@ class WebEngine:
         """Hover over an element (lazy)."""
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "hover"
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def drag(
         self,
@@ -282,6 +360,41 @@ class WebEngine:
         target_loc = locators.Locator(locator_type=target_type, value=target_value)
         self._execute_with_retry(
             lambda: interactions.drag_to(source_loc._build_selector(), target_loc._build_selector())
+        )
+        return self
+
+    def drag_by_offset(
+        self,
+        x: int,
+        y: int,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "locators.Locator":
+        """Drag an element by a specific offset."""
+        loc, _ = self._build_loc(locator_type, value, **filters)
+        loc._action = "drag_by_offset"
+        loc._action_args = {"x": x, "y": y}
+        res = self._register_action(loc)
+        self.flush()
+        return res
+
+    def hover_and_click(
+        self,
+        hover_locator_type: str | None = None,
+        hover_value: str = "",
+        click_locator_type: str | None = None,
+        click_value: str = "",
+        **filters: Any,
+    ) -> "WebEngine":
+        """Hover over one element and then click another (immediate)."""
+        self.flush()
+        # Handle hover locator
+        h_loc, _ = self._build_loc(hover_locator_type, hover_value, **filters)
+        # Handle click locator
+        c_loc, _ = self._build_loc(click_locator_type, click_value)
+        self._execute_with_retry(
+            lambda: interactions.hover_and_click(h_loc._build_selector(), c_loc._build_selector())
         )
         return self
 
@@ -307,17 +420,36 @@ class WebEngine:
         loc, value = self._build_loc(locator_type, value, third_arg=None, **filters)
         loc._action = "type"
         loc._action_args = {"text": text, "clear_first": clear_first, "force": filters.get("force", False)}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def clear(self, locator_type: str | None = None, value: str = "", **filters: Any) -> "locators.Locator":
         """Clear text from an element (builds locator without executing)."""
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "clear"
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def delete(self, locator_type: str | None = None, value: str = "", **filters: Any) -> "locators.Locator":
         """Delete text from element (alias for clear)."""
         return self.clear(locator_type, value, **filters)
+
+    def enter_mfa_code(
+        self,
+        totp_key: str,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "locators.Locator":
+        """Generate a TOTP code and type it into the element."""
+        loc, _ = self._build_loc(locator_type, value, **filters)
+        loc._action = "enter_mfa_code"
+        loc._action_args = {"totp_key": totp_key}
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def select(
         self,
@@ -330,7 +462,52 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "select"
         loc._action_args = {"value": option}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
+
+    def select_options(
+        self,
+        options: list[str | int],
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "locators.Locator":
+        """Select multiple options from dropdown."""
+        loc, _ = self._build_loc(locator_type, value, **filters)
+        loc._action = "select_options"
+        loc._action_args = {"values": options}
+        res = self._register_action(loc)
+        self.flush()
+        return res
+
+    def deselect_option(
+        self,
+        option: str | int,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "locators.Locator":
+        """Deselect an option from dropdown."""
+        loc, _ = self._build_loc(locator_type, value, **filters)
+        loc._action = "deselect_option"
+        loc._action_args = {"value": option}
+        res = self._register_action(loc)
+        self.flush()
+        return res
+
+    def deselect_all(
+        self,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "locators.Locator":
+        """Deselect all options from dropdown."""
+        loc, _ = self._build_loc(locator_type, value, **filters)
+        loc._action = "deselect_all_options"
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def select_dynamic(
         self,
@@ -345,7 +522,9 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "select_dynamic"
         loc._action_args = {"option": option}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def upload(
         self,
@@ -358,7 +537,41 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "upload_file"
         loc._action_args = {"file_path": file_path}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
+
+    def upload_files(
+        self,
+        file_paths: list[str],
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "locators.Locator":
+        """Upload multiple files to an element."""
+        loc, _ = self._build_loc(locator_type, value, **filters)
+        loc._action = "upload_files"
+        loc._action_args = {"file_paths": file_paths}
+        res = self._register_action(loc)
+        self.flush()
+        return res
+
+    def download(
+        self,
+        locator_type: str | None = None,
+        value: str = "",
+        timeout: float | None = None,
+        **filters: Any,
+    ) -> str:
+        """Click element and wait for download to complete. Returns path to file.
+        
+        This executes immediately and returns the path string, not a locator.
+        """
+        self.flush()
+        loc, _ = self._build_loc(locator_type, value, **filters)
+        return self._execute_with_retry(
+            lambda: interactions.download_file(loc._build_selector(), timeout=timeout)
+        )
 
     def remove_element(
         self,
@@ -369,7 +582,21 @@ class WebEngine:
         """Remove an element from the DOM via JavaScript."""
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "remove_element"
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
+
+    def remove_elements(
+        self,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> "WebEngine":
+        """Remove all matching elements from the DOM via JavaScript."""
+        self.flush()
+        loc, _ = self._build_loc(locator_type, value, **filters)
+        self._execute_with_retry(lambda: js_helpers.remove_elements(loc._build_selector()))
+        return self
 
     def pick_date(
         self,
@@ -382,26 +609,34 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "pick_date"
         loc._action_args = {"date": date}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def check(self, locator_type: str | None = None, value: str = "", **filters: Any) -> "locators.Locator":
         """Check a checkbox/radio (builds locator without executing)."""
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "check"
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def uncheck(self, locator_type: str | None = None, value: str = "", **filters: Any) -> "locators.Locator":
         """Uncheck a checkbox (builds locator without executing)."""
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "uncheck"
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def submit(self, locator_type: str | None = None, value: str = "", **filters: Any) -> "locators.Locator":
         """Submit a form by pressing Enter (builds locator without executing)."""
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "press_key"
         loc._action_args = {"key": "ENTER"}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     # -------------------------------------------------------------------------
     # Assertion Methods (New Unified API)
@@ -424,7 +659,9 @@ class WebEngine:
             
         loc._action = "assert_text"
         loc._action_args = {"expected": expected, "timeout": timeout}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def assert_contain_title(self, expected: str, timeout: float | None = None) -> "WebEngine":
         """Assert page title contains expected substring."""
@@ -462,7 +699,9 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "assert_contain_attribute"
         loc._action_args = {"attr": attr, "expected": expected, "timeout": timeout}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def assert_visible(
         self,
@@ -475,7 +714,9 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, third_arg=None, **filters)
         loc._action = "assert_visible"
         loc._action_args = {"timeout": timeout}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def assert_hidden(
         self,
@@ -488,7 +729,9 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, third_arg=None, **filters)
         loc._action = "assert_hidden"
         loc._action_args = {"timeout": timeout}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def wait_until_disappears(
         self,
@@ -523,7 +766,9 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "assert_enabled"
         loc._action_args = {"timeout": timeout}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def assert_disabled(
         self,
@@ -536,7 +781,9 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "assert_disabled"
         loc._action_args = {"timeout": timeout}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def assert_checked(
         self,
@@ -549,7 +796,9 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "assert_checked"
         loc._action_args = {"timeout": timeout}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     # -------------------------------------------------------------------------
     # Data Extraction Methods
@@ -593,6 +842,17 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         return self._execute_with_retry(lambda: data_extract.get_selected_option(loc._build_selector()))
 
+    def get_selected_options(
+        self,
+        locator_type: str | None = None,
+        value: str = "",
+        **filters: Any,
+    ) -> list[str]:
+        """Get the visible text of all selected options in a <select multiple>."""
+        self.flush()
+        loc, _ = self._build_loc(locator_type, value, **filters)
+        return self._execute_with_retry(lambda: data_extract.get_selected_options(loc._build_selector()))
+
     def assert_selected_option(
         self,
         expected: str,
@@ -605,7 +865,9 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "assert_selected_option"
         loc._action_args = {"expected": expected, "timeout": timeout}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def assert_contain_selected(
         self,
@@ -619,7 +881,9 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "assert_contain_selected"
         loc._action_args = {"expected": expected, "timeout": timeout}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def assert_data_type(
         self,
@@ -636,7 +900,9 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "assert_data_type"
         loc._action_args = {"expected_type": expected_type, "timeout": timeout}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def assert_value(
         self,
@@ -650,7 +916,9 @@ class WebEngine:
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "assert_value"
         loc._action_args = {"expected": expected, "timeout": timeout}
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     # -------------------------------------------------------------------------
     # Unified Aliases
@@ -693,7 +961,9 @@ class WebEngine:
         """Switch context to an iframe."""
         loc, _ = self._build_loc(locator_type, value, **filters)
         loc._action = "switch_to_iframe"
-        return self._register_action(loc)
+        res = self._register_action(loc)
+        self.flush()
+        return res
 
     def switch_to_default(self) -> "WebEngine":
         """Switch context back to the default content from an iframe."""
@@ -711,12 +981,38 @@ class WebEngine:
         screenshot.take_screenshot(name)
         return self
 
-    def assert_snapshot(self, name: str) -> "WebEngine":
-        """Assert visual layout using SeleniumBase snapshot capability."""
+    def assert_snapshot(
+        self,
+        name: str,
+        locator_type: str | None = None,
+        value: str = "",
+        timeout: float | None = None,
+        **filters: Any,
+    ) -> "locators.Locator":
+        """Assert visual layout of an element matches a baseline snapshot."""
+        loc, _ = self._build_loc(locator_type, value, **filters)
+        loc._action = "assert_snapshot"
+        loc._action_args = {"name": name, "timeout": timeout}
+        res = self._register_action(loc)
         self.flush()
-        # Defer to SeleniumBase's assert_window_snapshot via api
-        self._execute_with_retry(lambda: self.api.assert_window_snapshot(name))
-        return self
+        return res
+
+    def assert_aria_snapshot(
+        self,
+        expected_yaml: str,
+        locator_type: str | None = None,
+        value: str = "",
+        timeout: float | None = None,
+        **filters: Any,
+    ) -> "locators.Locator":
+        """Assert semantic structure matches expected ARIA YAML."""
+        loc, _ = self._build_loc(locator_type, value, **filters)
+        loc._action = "assert_aria_snapshot"
+        loc._action_args = {"expected_yaml": expected_yaml, "timeout": timeout}
+        res = self._register_action(loc)
+        self.flush()
+        return res
+
 
     # -------------------------------------------------------------------------
     # Page Object Helper
@@ -792,9 +1088,10 @@ class ActionProxy:
 
     def contain(self, **kwargs):
         """Set modifier to contain."""
-        if not kwargs: return self()
-        k, v = next(iter(kwargs.items()))
-        return self(k, "contain", v)
+        res = self()
+        if hasattr(res, 'contain'):
+            return res.contain(**kwargs)
+        return res
 
     def contains(self, **kwargs):
         """Alias for contain."""
@@ -802,25 +1099,32 @@ class ActionProxy:
 
     def exact(self, **kwargs):
         """Set modifier to exact."""
-        if not kwargs: return self()
-        k, v = next(iter(kwargs.items()))
-        return self(k, "exact", v)
+        res = self()
+        if hasattr(res, 'exact'):
+            return res.exact(**kwargs)
+        return res
 
     def starts(self, **kwargs):
         """Set modifier to starts."""
-        if not kwargs: return self()
-        k, v = next(iter(kwargs.items()))
-        return self(k, "starts", v)
+        res = self()
+        if hasattr(res, 'starts'):
+            return res.starts(**kwargs)
+        return res
 
 
 # Create singleton instance
 web = WebEngine()
 
 # Patch web instance methods with ActionProxy to allow w.click.contain(...)
+# ONLY wrap methods that return a Locator
 for action_name in [
-    "click", "click_all", "double_click", "right_click", "hover", "drag",
+    "click", "double_click", "right_click", "hover",
     "clear", "delete", "select", "check", "uncheck", "submit",
+    "enter_mfa_code", "remove_element",
     "assert_visible", "assert_hidden", "assert_enabled", "assert_disabled", "assert_checked",
+    "assert_text", "assert_contain_text", "assert_contain_attribute",
+    "assert_selected_option", "assert_contain_selected", "assert_data_type", "assert_value",
+    "assert_snapshot", "assert_aria_snapshot"
 ]:
     setattr(web, action_name, ActionProxy(getattr(web, action_name)))
 
@@ -838,6 +1142,9 @@ scroll = web.scroll
 drag = web.drag
 select = web.select
 select_option = web.select  # Unified alias
+select_options = web.select_options
+deselect_option = web.deselect_option
+deselect_all = web.deselect_all
 submit = web.submit
 clear = web.clear
 clear_text = web.clear  # Unified alias
@@ -860,6 +1167,25 @@ assert_value = web.assert_value
 get_text = web.get_text
 get_value = web.get_value
 get_selected_option = web.get_selected_option
+get_selected_options = web.get_selected_options
+download = web.download
+upload_files = web.upload_files
+enter_mfa_code = web.enter_mfa_code
+hover_and_click = web.hover_and_click
+drag_by_offset = web.drag_by_offset
+switch_to_new_window = web.switch_to_new_window
+switch_to_newest_window = web.switch_to_newest_window
+switch_to_parent_frame = web.switch_to_parent_frame
+switch_to_default_content = web.switch_to_default_content
+scroll_to_top = web.scroll_to_top
+remove_elements = web.remove_elements
+ad_block = web.ad_block
+get_cookies = storage.get_cookies
+add_cookie = storage.add_cookie
+delete_cookie = storage.delete_cookie
+clear_cookies = storage.clear_cookies
+save_cookies = storage.save_cookies
+load_cookies = storage.load_cookies
 
 # Legacy aliases (deprecated)
 get_by_role = web.click  # Not exactly, but provides quick access
@@ -871,6 +1197,7 @@ locator = web.wait  # Creates a locator for chaining
 retry = web.retry
 step = web.step
 debug = web.debug
+shadow = web.shadow
 
 __all__ = [
     "web",
@@ -881,20 +1208,37 @@ __all__ = [
     "refresh",
     "scroll",
     "scroll_to_bottom",
+    "scroll_to_top",
+    "switch_to_new_window",
+    "switch_to_newest_window",
+    "switch_to_parent_frame",
+    "switch_to_default_content",
     "get_url",
     "get_title",
     # Interactions
     "click",
     "hover",
+    "hover_and_click",
     "drag",
+    "drag_by_offset",
     # Inputs
     "type",
     "type_text",  # alias
     "clear",
     "select",
+    "select_options",
+    "deselect_option",
+    "deselect_all",
     "check",
     "uncheck",
     "submit",
+    "upload",
+    "upload_files",
+    "download",
+    "enter_mfa_code",
+    "remove_element",
+    "remove_elements",
+    "ad_block",
     # Assertions
     "assert_text",
     "assert_visible",
@@ -920,10 +1264,22 @@ __all__ = [
     "locator",
     "wait",
     "page",
+    "shadow",
     # Legacy (deprecated)
     "get_by_role",
     "get_by_text",
     "get_by_label",
+    # Data extraction
+    "get_text",
+    "get_value",
+    "get_selected_option",
+    "get_selected_options",
+    "get_cookies",
+    "add_cookie",
+    "delete_cookie",
+    "clear_cookies",
+    "save_cookies",
+    "load_cookies",
     # Locator type constants
     "role", "text", "label", "placeholder", "testid", "id_", "cls", "css_", "xpath", "tag", "attr", "any_",
     # Text modifiers

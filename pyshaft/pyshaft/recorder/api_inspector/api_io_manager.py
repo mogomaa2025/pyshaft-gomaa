@@ -105,6 +105,10 @@ def _step_to_dict(step: ApiRequestStep) -> dict[str, Any]:
         ],
         "loop_variable": step.loop_variable,
         "loop_payload_key": step.loop_payload_key,
+        "query_params": step.query_params,
+        "b64_param_name": step.b64_param_name,
+        "b64_param_json": step.b64_param_json,
+        "b64_param_encoded": step.b64_param_encoded,
         # Persist last run state
         "last_status": step.last_status,
         "last_response": step.last_response,
@@ -200,6 +204,10 @@ def _dict_to_step(data: dict[str, Any]) -> ApiRequestStep:
         pipeline=pipeline,
         loop_variable=data.get("loop_variable", ""),
         loop_payload_key=data.get("loop_payload_key", ""),
+        query_params=data.get("query_params", {}),
+        b64_param_name=data.get("b64_param_name", ""),
+        b64_param_json=data.get("b64_param_json", ""),
+        b64_param_encoded=data.get("b64_param_encoded", ""),
         # Restore last run state
         last_status=data.get("last_status"),
         last_response=data.get("last_response"),

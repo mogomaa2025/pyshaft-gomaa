@@ -6,12 +6,14 @@ Phase 4: full interaction suite.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import TYPE_CHECKING, Any
 
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.remote.webelement import WebElement
 
+from pyshaft.config import get_config
 from pyshaft.core.action_runner import run_action, run_driver_action
 from pyshaft.core.locator import DualLocator
 from pyshaft.session import session_context
@@ -80,6 +82,12 @@ def hover(locator: str | Locator) -> Any:
     run_action("hover", target, _hover, require_interactable=False)
 
 
+def hover_and_click(hover_locator: str | Locator, click_locator: str | Locator) -> Any:
+    """Hover over one element and then click another."""
+    hover(hover_locator)
+    click(click_locator)
+
+
 def drag_to(source: str | Locator, target: str | Locator) -> Any:
     """Drag source to target."""
     src_sel = source._get_final_selector() if hasattr(source, "_get_final_selector") else str(source)
@@ -92,3 +100,64 @@ def drag_to(source: str | Locator, target: str | Locator) -> Any:
         actions.drag_and_drop(s_el, t_el).perform()
 
     run_driver_action("drag_to", f"{src_sel} -> {tgt_sel}", _drag)
+
+
+def drag_by_offset(locator: str | Locator, x: int, y: int) -> Any:
+    """Drag an element by a specific offset."""
+    target = locator._get_final_selector() if hasattr(locator, "_get_final_selector") else str(locator)
+    
+    def _drag_offset(element: WebElement) -> None:
+        actions = ActionChains(element.parent)
+        actions.drag_and_drop_by_offset(element, x, y).perform()
+
+    run_action("drag_by_offset", target, _drag_offset)
+
+
+def download_file(locator: str | Locator, timeout: float | None = None) -> str:
+    """Click an element and wait for a file to be downloaded to the configured downloads_dir.
+
+    Returns:
+        The absolute path to the downloaded file.
+
+    Raises:
+        TimeoutError: If no new file appears within the timeout.
+    """
+    config = get_config()
+    downloads_path = os.path.abspath(config.report.downloads_dir)
+    os.makedirs(downloads_path, exist_ok=True)
+
+    # Snapshot existing files
+    existing_files = set(os.listdir(downloads_path))
+
+    # Trigger download
+    click(locator)
+
+    # Wait for new file
+    timeout = timeout or config.waits.default_element_timeout
+    deadline = time.time() + timeout
+    poll = config.waits.polling_interval
+
+    logger.info("Waiting for download in: %s (timeout: %ss)", downloads_path, timeout)
+
+    while time.time() < deadline:
+        current_files = set(os.listdir(downloads_path))
+        new_files = current_files - existing_files
+
+        # Filter out temporary download files
+        # Chrome: .crdownload, Firefox: .part, others: .tmp
+        actual_new_files = [f for f in new_files if not f.endswith((".crdownload", ".part", ".tmp"))]
+
+        if actual_new_files:
+            # Found it! Return the most recently modified one if multiple
+            full_paths = [os.path.join(downloads_path, f) for f in actual_new_files]
+            full_paths.sort(key=os.path.getmtime, reverse=True)
+            downloaded_path = full_paths[0]
+            logger.info("File downloaded: %s", downloaded_path)
+            return downloaded_path
+
+        time.sleep(poll)
+
+    raise TimeoutError(
+        f"Download timed out after {timeout}s in {downloads_path}. "
+        f"Files seen: {os.listdir(downloads_path)}"
+    )

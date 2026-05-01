@@ -110,6 +110,7 @@ ICONS = {
     "undo": "↩",
     "redo": "↪",
     "search": "🔎",
+    "copy": "📋",
     "pom": "📦",
     "workflow": "🔀",
     "code": "📝",
@@ -150,66 +151,19 @@ def get_stylesheet() -> str:
         font-size: {f['size_base']};
     }}
 
-    /* ===================== MENU BAR ===================== */
-    QMenuBar {{
-        background-color: {c['bg_dark']};
-        color: {c['text_primary']};
-        border-bottom: 1px solid {c['border']};
-        padding: 2px 0;
-        font-size: {f['size_base']};
-    }}
-    QMenuBar::item {{
-        padding: 6px 12px;
-        border-radius: 4px;
-    }}
-    QMenuBar::item:selected {{
-        background-color: {c['bg_hover']};
-    }}
-    QMenu {{
-        background-color: {c['bg_medium']};
-        border: 1px solid {c['border']};
-        border-radius: 8px;
-        padding: 4px;
-    }}
-    QMenu::item {{
-        padding: 8px 24px;
-        border-radius: 4px;
-    }}
-    QMenu::item:selected {{
-        background-color: {c['accent_purple']};
-    }}
-    QMenu::separator {{
-        height: 1px;
-        background: {c['border']};
-        margin: 4px 8px;
-    }}
-
-    /* ===================== TOOLBAR ===================== */
-    QToolBar {{
-        background-color: {c['bg_dark']};
-        border-bottom: 1px solid {c['border']};
-        padding: 4px 8px;
-        spacing: 6px;
-    }}
-    QToolBar::separator {{
-        width: 1px;
-        background: {c['border']};
-        margin: 4px 6px;
-    }}
-
     /* ===================== BUTTONS ===================== */
     QPushButton {{
         background-color: {c['bg_light']};
         color: {c['text_primary']};
         border: 1px solid {c['border']};
         border-radius: 6px;
-        padding: 6px 16px;
+        padding: 8px 16px;
         font-size: {f['size_base']};
         font-weight: 500;
     }}
     QPushButton:hover {{
         background-color: {c['bg_hover']};
-        border-color: {c['border_light']};
+        border-color: {c['accent_purple']};
     }}
     QPushButton:pressed {{
         background-color: {c['bg_selected']};
@@ -233,32 +187,37 @@ def get_stylesheet() -> str:
 
     /* Success/green button */
     QPushButton#success {{
-        background-color: {c['accent_green']};
-        border-color: {c['accent_green']};
-        color: {c['bg_darkest']};
+        background-color: {c['accent_green']}22;
+        border: 1px solid {c['accent_green']};
+        color: {c['accent_green']};
         font-weight: 600;
     }}
     QPushButton#success:hover {{
-        background-color: {c['accent_green_hover']};
+        background-color: {c['accent_green']};
+        color: {c['bg_darkest']};
     }}
 
     /* Danger/red button */
     QPushButton#danger {{
-        background-color: {c['accent_red']};
-        border-color: {c['accent_red']};
-        color: #FFFFFF;
+        background-color: {c['accent_red']}22;
+        border: 1px solid {c['accent_red']};
+        color: {c['accent_red']};
         font-weight: 600;
+    }}
+    QPushButton#danger:hover {{
+        background-color: {c['accent_red']};
+        color: #FFFFFF;
     }}
 
     /* Record button (special) */
     QPushButton#record_btn {{
         background-color: {c['accent_red']};
-        border-color: {c['accent_red']};
+        border: none;
         color: #FFFFFF;
         font-weight: 700;
         font-size: {f['size_md']};
-        border-radius: 8px;
-        padding: 8px 20px;
+        border-radius: 20px;
+        padding: 4px 20px;
     }}
     QPushButton#record_btn:hover {{
         background-color: #FF6B63;
@@ -268,149 +227,64 @@ def get_stylesheet() -> str:
         border: 2px solid #FFFFFF;
     }}
 
-    /* Small action buttons in inspector */
-    QPushButton.action_btn {{
-        background-color: {c['bg_card']};
-        border: 1px solid {c['border']};
-        border-radius: 4px;
-        padding: 4px 10px;
-        font-size: {f['size_sm']};
-    }}
-    QPushButton.action_btn:hover {{
-        background-color: {c['accent_purple_dim']};
-        border-color: {c['accent_purple']};
-    }}
-
-    QPushButton.assert_btn {{
-        background-color: {c['bg_card']};
-        border: 1px solid {c['border']};
-        border-radius: 4px;
-        padding: 4px 10px;
-        font-size: {f['size_sm']};
-    }}
-    QPushButton.assert_btn:hover {{
-        background-color: {c['accent_green_dim']};
-        border-color: {c['accent_green']};
-    }}
-
     /* ===================== TAB WIDGET ===================== */
     QTabWidget::pane {{
         background-color: {c['bg_medium']};
         border: 1px solid {c['border']};
         border-radius: 8px;
+        top: -1px;
     }}
     QTabBar::tab {{
-        background-color: {c['bg_dark']};
+        background-color: transparent;
         color: {c['text_secondary']};
-        border: 1px solid {c['border']};
-        border-bottom: none;
-        padding: 8px 16px;
-        margin-right: 2px;
-        border-top-left-radius: 6px;
-        border-top-right-radius: 6px;
-        font-size: {f['size_base']};
+        padding: 10px 20px;
+        margin-right: 4px;
+        font-weight: 500;
     }}
     QTabBar::tab:selected {{
-        background-color: {c['bg_medium']};
-        color: {c['text_primary']};
+        color: {c['accent_purple']};
         border-bottom: 2px solid {c['accent_purple']};
     }}
     QTabBar::tab:hover:!selected {{
-        background-color: {c['bg_hover']};
         color: {c['text_primary']};
+        background-color: {c['bg_hover']}44;
     }}
 
-    /* ===================== TEXT INPUT ===================== */
-    QLineEdit {{
-        background-color: {c['bg_medium']};
-        color: {c['text_primary']};
-        border: 1px solid {c['border']};
-        border-radius: 6px;
-        padding: 6px 12px;
-        font-size: {f['size_base']};
-        selection-background-color: {c['accent_purple_dim']};
+    /* ===================== SCROLL BAR ===================== */
+    QScrollBar:vertical {{
+        background: transparent;
+        width: 10px;
+        margin: 0px;
     }}
-    QLineEdit:focus {{
-        border-color: {c['accent_purple']};
-        background-color: {c['bg_light']};
+    QScrollBar::handle:vertical {{
+        background-color: {c['border']};
+        border-radius: 5px;
+        min-height: 20px;
+        margin: 2px;
     }}
-    QLineEdit::placeholder {{
-        color: {c['text_muted']};
+    QScrollBar::handle:vertical:hover {{
+        background-color: {c['text_muted']};
     }}
-
-    QTextEdit, QPlainTextEdit {{
-        background-color: {c['bg_medium']};
-        color: {c['text_primary']};
-        border: 1px solid {c['border']};
-        border-radius: 6px;
-        padding: 8px;
-        font-family: {f['family_mono']};
-        font-size: {f['size_sm']};
-        selection-background-color: {c['accent_purple_dim']};
-    }}
-    QTextEdit:focus, QPlainTextEdit:focus {{
-        border-color: {c['accent_purple']};
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+        height: 0px;
     }}
 
     /* ===================== COMBO BOX ===================== */
     QComboBox {{
         background-color: {c['bg_medium']};
-        color: {c['text_primary']};
         border: 1px solid {c['border']};
         border-radius: 6px;
         padding: 6px 12px;
-        font-size: {f['size_base']};
-    }}
-    QComboBox:hover {{
-        border-color: {c['border_light']};
-    }}
-    QComboBox:focus {{
-        border-color: {c['accent_purple']};
     }}
     QComboBox::drop-down {{
         border: none;
-        padding-right: 8px;
-    }}
-    QComboBox QAbstractItemView {{
-        background-color: {c['bg_medium']};
-        color: {c['text_primary']};
-        border: 1px solid {c['border']};
-        border-radius: 4px;
-        selection-background-color: {c['accent_purple']};
     }}
 
-    /* ===================== SCROLL BAR ===================== */
-    QScrollBar:vertical {{
-        background-color: {c['bg_darkest']};
-        width: 8px;
-        border-radius: 4px;
-    }}
-    QScrollBar::handle:vertical {{
-        background-color: {c['border']};
-        border-radius: 4px;
-        min-height: 30px;
-    }}
-    QScrollBar::handle:vertical:hover {{
-        background-color: {c['border_light']};
-    }}
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-        height: 0;
-    }}
-    QScrollBar:horizontal {{
-        background-color: {c['bg_darkest']};
-        height: 8px;
-        border-radius: 4px;
-    }}
-    QScrollBar::handle:horizontal {{
-        background-color: {c['border']};
-        border-radius: 4px;
-        min-width: 30px;
-    }}
-    QScrollBar::handle:horizontal:hover {{
-        background-color: {c['border_light']};
-    }}
-    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
-        width: 0;
+    /* ===================== HUD / POPUP ===================== */
+    QWidget#element_popup {{
+        background-color: {c['bg_dark']}EE;
+        border: 1px solid {c['accent_purple']}88;
+        border-radius: 12px;
     }}
 
     /* ===================== SPLITTER ===================== */
@@ -574,28 +448,30 @@ def get_stylesheet() -> str:
 
     /* ===================== MODE TOGGLE ===================== */
     QComboBox#mode_toggle {{
-        background-color: {c['accent_purple_dim']};
-        border: 1px solid {c['accent_purple']};
-        border-radius: 6px;
-        padding: 6px 14px;
-        font-size: {f['size_base']};
-        font-weight: 600;
+        background-color: {c['accent_purple_dim']}33;
+        border: 1px solid {c['accent_purple']}88;
+        border-radius: 14px;
+        padding: 4px 16px;
+        font-size: 11px;
+        font-weight: 700;
         color: {c['text_primary']};
+        min-width: 100px;
     }}
     QComboBox#mode_toggle:hover {{
-        background-color: {c['accent_purple']};
+        background-color: {c['accent_purple']}44;
+        border-color: {c['accent_purple']};
     }}
     QComboBox#mode_toggle::drop-down {{
         border: none;
-        padding-right: 8px;
+        width: 20px;
     }}
     QComboBox#mode_toggle QAbstractItemView {{
-        background-color: {c['bg_medium']};
+        background-color: {c['bg_dark']};
         color: {c['text_primary']};
         border: 1px solid {c['accent_purple']};
-        border-radius: 6px;
+        border-radius: 8px;
         selection-background-color: {c['accent_purple']};
-        padding: 4px;
+        outline: none;
     }}
 
     /* ===================== RECORDING PULSE ===================== */
@@ -604,4 +480,3 @@ def get_stylesheet() -> str:
         border: 2px solid #FFFFFF;
     }}
     """
-

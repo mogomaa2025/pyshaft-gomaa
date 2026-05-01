@@ -8,6 +8,7 @@ Configures headless mode, window size, and common stability arguments.
 from __future__ import annotations
 
 import logging
+import os
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
@@ -87,6 +88,7 @@ class DriverFactory:
     def _create_chrome(headless: bool, window_size: str) -> WebDriver:
         """Create a Chrome WebDriver instance."""
         options = ChromeOptions()
+        config = get_config()
 
         for arg in _CHROME_STABILITY_ARGS:
             options.add_argument(arg)
@@ -97,12 +99,22 @@ class DriverFactory:
         width, height = _parse_window_size(window_size)
         options.add_argument(f"--window-size={width},{height}")
 
-        # Try Selenium's built-in manager first (no network download needed
-        # if driver is already cached or browser includes it)
+        # Download configuration
+        downloads_path = os.path.abspath(config.report.downloads_dir)
+        os.makedirs(downloads_path, exist_ok=True)
+        prefs = {
+            "download.default_directory": downloads_path,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True,
+        }
+        options.add_experimental_option("prefs", prefs)
+
+        # Try Selenium's built-in manager first
         try:
             driver = webdriver.Chrome(options=options)
             _configure_timeouts(driver)
-            logger.info("Chrome driver created via SeleniumManager")
+            logger.info("Chrome driver created via SeleniumManager (Downloads: %s)", downloads_path)
             return driver
         except Exception as e1:
             logger.debug("SeleniumManager failed: %s — trying webdriver-manager", e1)
@@ -123,9 +135,19 @@ class DriverFactory:
     def _create_firefox(headless: bool, window_size: str) -> WebDriver:
         """Create a Firefox WebDriver instance."""
         options = FirefoxOptions()
+        config = get_config()
 
         if headless:
             options.add_argument("--headless")
+
+        # Download configuration
+        downloads_path = os.path.abspath(config.report.downloads_dir)
+        os.makedirs(downloads_path, exist_ok=True)
+        options.set_preference("browser.download.folderList", 2)
+        options.set_preference("browser.download.dir", downloads_path)
+        options.set_preference("browser.download.useDownloadDir", True)
+        options.set_preference("browser.helperApps.neverAsk.saveToDisk", "application/octet-stream,application/pdf,application/zip,text/csv")
+        options.set_preference("pdfjs.disabled", True)
 
         # Try Selenium's built-in manager first
         try:
@@ -133,7 +155,7 @@ class DriverFactory:
             width, height = _parse_window_size(window_size)
             driver.set_window_size(width, height)
             _configure_timeouts(driver)
-            logger.info("Firefox driver created via SeleniumManager")
+            logger.info("Firefox driver created via SeleniumManager (Downloads: %s)", downloads_path)
             return driver
         except Exception as e1:
             logger.debug("SeleniumManager failed: %s — trying webdriver-manager", e1)
@@ -156,6 +178,7 @@ class DriverFactory:
     def _create_edge(headless: bool, window_size: str) -> WebDriver:
         """Create an Edge WebDriver instance."""
         options = EdgeOptions()
+        config = get_config()
 
         for arg in _CHROME_STABILITY_ARGS:
             options.add_argument(arg)
@@ -166,11 +189,21 @@ class DriverFactory:
         width, height = _parse_window_size(window_size)
         options.add_argument(f"--window-size={width},{height}")
 
+        # Download configuration
+        downloads_path = os.path.abspath(config.report.downloads_dir)
+        os.makedirs(downloads_path, exist_ok=True)
+        prefs = {
+            "download.default_directory": downloads_path,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+        }
+        options.add_experimental_option("prefs", prefs)
+
         # Try Selenium's built-in manager first
         try:
             driver = webdriver.Edge(options=options)
             _configure_timeouts(driver)
-            logger.info("Edge driver created via SeleniumManager")
+            logger.info("Edge driver created via SeleniumManager (Downloads: %s)", downloads_path)
             return driver
         except Exception as e1:
             logger.debug("SeleniumManager failed: %s — trying webdriver-manager", e1)

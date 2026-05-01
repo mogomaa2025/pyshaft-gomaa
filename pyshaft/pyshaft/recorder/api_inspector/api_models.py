@@ -33,9 +33,12 @@ class AssertionType(StrEnum):
     JSON_PATH_EQUALS = "json_path_equals"
     JSON_PATH_CONTAINS = "json_path_contains"
     JSON_PATH_TYPE = "json_path_type"
+    JSON_PATH_DATE = "json_path_date"
+    JSON_PATH_UUID = "json_path_uuid"
     RESPONSE_CONTAINS = "response_contains"
     HEADER_EQUALS = "header_equals"
     RESPONSE_TIME_LT = "response_time_lt"
+    JSON_SCHEMA = "json_schema"
 
 
 class PipelineOp(StrEnum):
@@ -105,6 +108,14 @@ class ApiRequestStep:
     # Loop support
     loop_variable: str = ""      # Variable name containing the array
     loop_payload_key: str = ""   # Key in payload to substitute with loop item
+
+    # Query Parameters (from Params tab)
+    query_params: dict[str, str] = field(default_factory=dict)
+    
+    # Base64-Encoded Query Parameter
+    b64_param_name: str = ""
+    b64_param_json: str = ""
+    b64_param_encoded: str = ""
 
     # Execution result (populated after running)
     last_status: int | None = None

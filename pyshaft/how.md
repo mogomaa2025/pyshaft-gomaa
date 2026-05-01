@@ -68,23 +68,23 @@ from pyshaft import (
 
 ### 2.1 Locator Types
 
-| Type | Syntax | Example | Description |
-|------|--------|---------|-------------|
-| **Role** | `w.click(role, value)` | `w.click(role, button)` | By ARIA role |
-| **Text (exact)** | `w.click.exact(text="value")` | `w.click.exact(text="Submit")` | Exact text match |
-| **Text (contain)** | `w.click.contain(text="value")` | `w.click.contain(text="Log")` | Text contains |
-| **Label** | `w.click(label, value)` | `w.click(label, "Email")` | Via label element |
-| **Placeholder** | `w.click(placeholder, value)` | `w.click(placeholder, "email")` | Input placeholder |
-| **Test ID** | `w.click(testid, value)` | `w.click(testid, "login-btn")` | data-testid |
-| **ID** | `w.click(id_, value)` | `w.click(id_, "username")` | CSS #id |
-| **ID Starts** | `w.click.starts(id="value")` | `w.click.starts(id="btn-")` | ID starts with |
-| **ID Contains** | `w.click.contain(id="value")` | `w.click.contain(id="name")` | ID contains |
-| **Class** | `w.click(cls, value)` | `w.click(cls, "btn-primary")` | CSS .class |
-| **CSS** | `w.click(css_, value)` | `w.click(css_, "#id .class")` | Raw CSS selector |
-| **XPath** | `w.click(xpath, value)` | `w.click(xpath, "//button")` | Raw XPath |
-| **Tag** | `w.click(tag, value)` | `w.click(tag, "div")` | HTML tag name |
-| **Attr** | `w.click(attr, name)` | `w.click(attr, "data-id")` | Has attribute |
-| **Any** | `w.click(any_, value)` | `w.click(any_, "text")` | Any element with text |
+| Type               | Syntax                          | Example                         | Description           |
+| ------------------ | ------------------------------- | ------------------------------- | --------------------- |
+| **Role**           | `w.click(role, value)`          | `w.click(role, button)`         | By ARIA role          |
+| **Text (exact)**   | `w.click.exact(text="value")`   | `w.click.exact(text="Submit")`  | Exact text match      |
+| **Text (contain)** | `w.click.contain(text="value")` | `w.click.contain(text="Log")`   | Text contains         |
+| **Label**          | `w.click(label, value)`         | `w.click(label, "Email")`       | Via label element     |
+| **Placeholder**    | `w.click(placeholder, value)`   | `w.click(placeholder, "email")` | Input placeholder     |
+| **Test ID**        | `w.click(testid, value)`        | `w.click(testid, "login-btn")`  | data-testid           |
+| **ID**             | `w.click(id_, value)`           | `w.click(id_, "username")`      | CSS #id               |
+| **ID Starts**      | `w.click.starts(id="value")`    | `w.click.starts(id="btn-")`     | ID starts with        |
+| **ID Contains**    | `w.click.contain(id="value")`   | `w.click.contain(id="name")`    | ID contains           |
+| **Class**          | `w.click(cls, value)`           | `w.click(cls, "btn-primary")`   | CSS .class            |
+| **CSS**            | `w.click(css_, value)`          | `w.click(css_, "#id .class")`   | Raw CSS selector      |
+| **XPath**          | `w.click(xpath, value)`         | `w.click(xpath, "//button")`    | Raw XPath             |
+| **Tag**            | `w.click(tag, value)`           | `w.click(tag, "div")`           | HTML tag name         |
+| **Attr**           | `w.click(attr, name)`           | `w.click(attr, "data-id")`      | Has attribute         |
+| **Any**            | `w.click(any_, value)`          | `w.click(any_, "text")`         | Any element with text |
 
 ### 2.2 Property Chains (Modifiers)
 
@@ -305,9 +305,12 @@ w.wait_until_disappears(id_, "ajax-loader", timeout=10)
 # Visual Regression Testing (Snapshot comparison)
 w.assert_snapshot("dashboard_baseline")
 ```
+
 # Element attribute contains
+
 w.assert_contain_attribute("class", "active", role, button)
-```
+
+````
 
 ---
 
@@ -319,7 +322,7 @@ w.assert_contain_attribute("class", "active", role, button)
 # Action returns Locator for further chaining
 w.click(role, button).nth(1).should_be_visible()
 w.type("email", role, textbox).filter(placeholder="email").should_be_enabled()
-```
+````
 
 ### 5.2 Infinite Action Sequence
 
@@ -331,6 +334,18 @@ Chain across different independent actions in a single fluent flow. Wrap in `()`
   .click.contain(text="Submit").inside(id_, "form")
   .assert_contain_title("Successfully")
   .assert_contain_text("Successfully").should_be_visible())
+```
+
+### 5.3 Chaining on the Same Element
+
+You can perform multiple actions on the exact same element sequentially without repeating the locator:
+
+```python
+# Hover over a menu, then click it
+w.hover(id_, "dropdown-menu").click()
+
+# Clear an input, type into it, then press ENTER
+w.clear(role, textbox).type("search query").press_key("ENTER")
 ```
 
 ### 5.3 Assertion Chain
@@ -392,19 +407,19 @@ w.click.contain(text="Login") \
 
 ### 7.1 Single Index
 
-| Syntax | Description |
-|--------|-------------|
-| `.nth(1)` | 1st element |
-| `.nth(2)` | 2nd element |
+| Syntax     | Description  |
+| ---------- | ------------ |
+| `.nth(1)`  | 1st element  |
+| `.nth(2)`  | 2nd element  |
 | `.nth(-1)` | Last element |
 
 ### 7.2 Range (Batch Actions)
 
-| Syntax | Description |
-|--------|-------------|
-| `.nth(1:5)` | Elements 1–5 |
+| Syntax      | Description      |
+| ----------- | ---------------- |
+| `.nth(1:5)` | Elements 1–5     |
 | `.nth(0:3)` | First 3 elements |
-| `.nth(5:)` | From 5th to end |
+| `.nth(5:)`  | From 5th to end  |
 
 ```python
 # Click first 3 buttons
@@ -595,11 +610,11 @@ python -m pyshaft.recorder
 
 The recorder operates in three modes via the toolbar **Mode** selector:
 
-| Mode | Default | Description |
-|------|---------|-------------|
-| **🔍 Inspector** | ✅ | Browse & click elements → popup appears with actions/assertions → create steps manually |
-| **⏺ Record** | | Auto-capture all browser interactions (clicks, typing, selects) as steps |
-| **🔍+⏺ Both** | | Inspector popup + auto-recording simultaneously |
+| Mode             | Default | Description                                                                             |
+| ---------------- | ------- | --------------------------------------------------------------------------------------- |
+| **🔍 Inspector** | ✅      | Browse & click elements → popup appears with actions/assertions → create steps manually |
+| **⏺ Record**     |         | Auto-capture all browser interactions (clicks, typing, selects) as steps                |
+| **🔍+⏺ Both**    |         | Inspector popup + auto-recording simultaneously                                         |
 
 ### 11.3 Inspector Workflow
 
@@ -633,13 +648,13 @@ Toggle between **Chain** (fluent chaining) and **Flat** (one action per line) vi
 
 ### 11.5 Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+R` | Toggle recording |
-| `Ctrl+I` | Toggle inspector |
-| `Ctrl+K` | Command palette |
-| `Ctrl+Z` | Undo |
-| `Ctrl+S` | Save session |
+| Shortcut | Action            |
+| -------- | ----------------- |
+| `Ctrl+R` | Toggle recording  |
+| `Ctrl+I` | Toggle inspector  |
+| `Ctrl+K` | Command palette   |
+| `Ctrl+Z` | Undo              |
+| `Ctrl+S` | Save session      |
 | `Ctrl+E` | Export code (.py) |
 
 ---
@@ -675,11 +690,11 @@ from pyshaft import web as w, role, textbox, button, heading, password
 
 def test_login():
     w.open_url("https://example.com/login")
-    
+
     w.type("admin@example.com", role, textbox).filter(placeholder="email")
     w.type("secret123", role, password)
     w.click(role, button).filter(type="submit")
-    
+
     w.assert_url("https://example.com/dashboard")
     w.assert_text("Welcome, Admin", role, heading)
 ```
@@ -691,7 +706,7 @@ from pyshaft import web as w, role, textbox, button, heading, id_
 
 def test_login_chain():
     w.open_url("https://example.com/login")
-    
+
     (w.type("admin@example.com", role, textbox).filter(placeholder="email")
       .type("secret123", id_, "password")
       .click(role, button).filter(type="submit")
@@ -706,22 +721,22 @@ from pyshaft import web as w, role, button, textbox
 
 def test_form_validation():
     w.open_url("https://example.com/form")
-    
+
     # Submit empty form
     w.click(role, button).filter(type="submit")
-    
+
     # Assert validation errors
     w.assert_visible(role, "error-message").nth(1)
     w.assert_visible(role, "error-message").nth(2)
-    
+
     # Fill form
     w.type("John", role, textbox).filter(name="firstName")
     w.type("Doe", role, textbox).filter(name="lastName")
     w.type("john@example.com", role, textbox).filter(name="email")
-    
+
     # Submit
     w.click(role, button).filter(type="submit")
-    
+
     # Assert success
     w.assert_visible(role, "success-message")
 ```
@@ -733,14 +748,14 @@ from pyshaft import web as w, role, button, textbox, tag
 
 def test_table():
     w.open_url("https://example.com/users")
-    
+
     # Click edit on 2nd row
     w.click(role, button).inside(tag, "tr").nth(2).filter(class_="edit")
-    
+
     # Update user
     w.type("Jane", role, textbox).filter(name="name")
     w.click(role, button).filter(type="submit")
-    
+
     # Verify update
     w.assert_text("Jane", tag, "td").nth(2)
 ```
@@ -755,7 +770,7 @@ def test_api_then_web():
     (a.post("/users", {"name": "Test User"})
        .assert_status(201)
        .extract_json("id", "new_user_id"))
-    
+
     # Verify in web
     w.open_url("/users")
     w.assert_visible(id_, f"user-{a.stored('new_user_id')}")

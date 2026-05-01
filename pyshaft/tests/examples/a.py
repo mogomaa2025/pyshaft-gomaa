@@ -4,9 +4,6 @@ import pytest
 
 from pyshaft import api
 
-# Configure logging to see prettify() output even without -s (in some environments)
-logging.basicConfig(level=logging.INFO)
-
 name = "Add your name in the body"
 body =({
 	"name": name
@@ -40,3 +37,98 @@ def test_api_workflow():
         .extract_json("$.headers.content-length", "ll")
     )
 
+@pytest.mark.pyshaft_api
+def test_api_workflow():
+    (
+        api.request()
+        .post("http://10.0.80.155:9090/EWebService-web/resources/wharfs/17")
+        .prettify()
+        .assert_status(200)
+
+    )
+
+swagger_base_url = "http://10.9.100.170"
+@pytest.mark.pyshaft_api
+def test_filter_importer_exporter():
+    # Step 1: filter-importer-exporter
+    (
+        api.request()
+        .get(str(swagger_base_url) + ":8090/EWebService-web/v1/importer-exporter?filtered=ewoiaWQiIDogNQp9")
+        .prettify()
+        .assert_status(200)
+        .assert_json_path("$.message", "Success")
+        .assert_json_path("$.success", True)
+        .assert_json_type("$.timestamp", "str")
+        .assert_json_path("$.data[0].eiAddress", "safasfasgasgas")
+
+    )
+
+youssef_base_url = "http://10.0.40.153"
+def test_get_all_berths():
+    # Step 1: get all berths
+    (
+        api.request()
+        .get(str(youssef_base_url) + ":9090/EWebService-web/resources/berths")
+        .prettify()
+        .assert_status(200)
+    )
+
+
+
+def test_get_all_berths():
+    # Step 1: get all berths
+    (
+        api.request()
+        .get(str(youssef_base_url) + ":9090/EWebService-web/resources/berths")
+        .prettify()
+        .assert_status(200)
+        .assert_json_contains("$[0].storeRegionName", "منطقة أولى")
+
+    )
+
+for i in range(3):
+    @pytest.mark.pyshaft_api
+    def test_test():
+        api.request()
+        api.get(str(youssef_base_url)+":9090/EWebService-web/resources/berths")
+        api.assert_status(200)
+
+
+
+body =({
+  "id": "5",
+  "name": "{{new-wharf-name}}",
+  "portOfOperationId": 1,
+  "unitId": 1,
+  "length": 20,
+  "extension": 6.0,
+  "backExtension": 3.0,
+  "allowFwdExtensionFlag": True,
+  "allowBackExtensionFlag": False
+} )
+@pytest.mark.pyshaft_api
+# @api.data_from_csv('data.csv')
+# @api.data_from_json('data.json')
+def test_get_agent_dashboard():
+    # Step 1: GET Agent dashboard
+    (
+        api.request(body)
+        .get(str(swagger_base_url) + ":8090/EWebService-web/v1/ship-visits/dashboard")
+        .prettify()
+        .assert_status(200)
+    )
+
+
+
+
+@pytest.mark.pyshaft_api
+# @api.data_from_csv('data.csv')
+# @api.data_from_json('data.json')
+def test_get_all_berths():
+    # Step 1: get all berths
+    (
+        api.request()
+        .get(str(youssef_base_url) + ":9090/EWebService-web/resources/berths")
+        .prettify()
+        .assert_status(200)
+    )

@@ -17,6 +17,9 @@ from pyshaft.web import (
     password, email, submit,
 )
 from pyshaft.utils import data_from_csv, data_from_json, data_from, retry, retry_on_exception, tag as test_tag
+from pyshaft.testdata import TestDataManager, load_test_data, load_csv, load_json
+from pyshaft.data_pipeline import pipeline, store_value, get_value
+from pyshaft.data_decorators import data, data_from, parametrize
 
 __all__ = [
     "__version__",
@@ -38,4 +41,16 @@ __all__ = [
     "retry",
     "retry_on_exception",
     "test_tag",
+    # Test Data
+    "TestDataManager",
+    "load_test_data",
+    "load_csv",
+    "load_json",
+    # Data Pipeline
+    "pipeline",
+    "store_value",
+    "get_value",
+    # Data Decorators (NEW!)
+    "data",
+    "parametrize",
 ]

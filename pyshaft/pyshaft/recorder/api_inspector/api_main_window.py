@@ -15,8 +15,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
+import re
+import string
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -82,12 +86,29 @@ class DockTitleBar(QWidget):
         self.label.setStyleSheet(f"font-weight: 700; font-size: 8pt; color: {COLORS['text_secondary']}; letter-spacing: 1px;")
         layout.addWidget(self.label, 1)
         
-        btn_style = f"QPushButton {{ background: transparent; border: none; color: {COLORS['text_muted']}; font-size: 14px; border-radius: 3px; }} QPushButton:hover {{ background: {COLORS['bg_hover']}; color: {COLORS['text_primary']}; }}"
-        btn_min = QPushButton("—"); btn_min.setFixedSize(24, 20); btn_min.setToolTip("Minimize (Hide)"); btn_min.setStyleSheet(btn_style); btn_min.clicked.connect(lambda: self.dock.hide())
+        btn_style = f"QPushButton {{ background: transparent; border: none; color: {COLORS['text_primary']}; font-size: 14px; border-radius: 3px; font-weight: bold; }} QPushButton:hover {{ background: {COLORS['bg_hover']}; color: {COLORS['accent_purple']}; }}"
+        
+        btn_min = QPushButton("—")
+        btn_min.setFixedSize(24, 20)
+        btn_min.setToolTip("Minimize (Hide)")
+        btn_min.setStyleSheet(btn_style)
+        btn_min.clicked.connect(lambda: self.dock.hide())
         layout.addWidget(btn_min)
         
-        btn_float = QPushButton("❐"); btn_float.setFixedSize(24, 20); btn_float.setStyleSheet(btn_style); btn_float.clicked.connect(lambda: self.dock.setFloating(not self.dock.isFloating()))
+        btn_float = QPushButton("❐")
+        btn_float.setFixedSize(24, 20)
+        btn_float.setToolTip("Float/Dock")
+        btn_float.setStyleSheet(btn_style)
+        btn_float.clicked.connect(lambda: self.dock.setFloating(not self.dock.isFloating()))
         layout.addWidget(btn_float)
+        
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(24, 20)
+        btn_close.setToolTip("Close")
+        btn_close.setStyleSheet(btn_style)
+        btn_close.clicked.connect(lambda: self.dock.close())
+        layout.addWidget(btn_close)
+        
         self.setStyleSheet(f"background: {COLORS['bg_dark']}; border-bottom: 1px solid {COLORS['border']};")
 
 
@@ -103,6 +124,7 @@ class ApiMainWindow(QMainWindow):
         super().__init__(parent)
         self._workflow = ApiWorkflow(); self._bridge = _SignalBridge(); self._bridge.response_received.connect(self._on_response_received)
         self._docks: list[QDockWidget] = []; self._focus_mode = False; self._session_path = Path.home() / ".pyshaft_api_session.json"
+        self._current_scope = None  # ApiRequestStep | ApiFolder | None
         import requests; self._session = requests.Session()
         self.setWindowTitle("⚡ PyShaft API Inspector"); self.setMinimumSize(1000, 700)
         
@@ -187,6 +209,12 @@ class ApiMainWindow(QMainWindow):
         resp_layout.addWidget(resp_header)
 
         self._response_viewer = ApiJsonViewer()
+        self._response_viewer.assertion_requested.connect(self._on_quick_assertion)
+        self._response_viewer.extraction_requested.connect(self._on_quick_extraction)
+        self._response_viewer.remove_assertion_requested.connect(self._on_quick_remove_assertion)
+        self._response_viewer.path_selected.connect(self._on_json_path_selected)
+        self._response_viewer.data_changed.connect(self._on_response_data_edited)
+        self._response_viewer.schema_assertion_requested.connect(self._on_schema_assertion)
         resp_layout.addWidget(self._response_viewer)
 
         # Create a splitter for request/response
@@ -196,27 +224,42 @@ class ApiMainWindow(QMainWindow):
         self._splitter.addWidget(req_container)
         self._splitter.addWidget(resp_container)
         self._splitter.setSizes([500, 500])
-        self.setCentralWidget(self._splitter)
+        
+        # Main Central Tabs (Centralizing all major views)
+        self._main_tabs = QTabWidget()
+        self._main_tabs.setStyleSheet(f"QTabWidget::pane {{ border: none; background: {COLORS['bg_dark']}; }} QTabBar::tab {{ background: {COLORS['bg_dark']}; padding: 12px 24px; color: {COLORS['text_muted']}; font-size: 12px; }} QTabBar::tab:selected {{ background: {COLORS['bg_card']}; color: {COLORS['accent_purple']}; font-weight: 700; }}")
+        self._main_tabs.addTab(self._splitter, "🛠 Builder")
+        
+        self.setCentralWidget(self._main_tabs)
 
     def _build_docks(self) -> None:
         self.setDockOptions(QMainWindow.DockOption.AllowTabbedDocks | QMainWindow.DockOption.AnimatedDocks)
-        # 1. Explorer & History
-        self._explorer_dock = ApiExplorerDock(self); self._explorer_dock.step_selected.connect(self._open_step_in_tab); self._explorer_dock.item_deleted.connect(self._on_item_deleted_refresh)
+        # 1. Explorer (Left Side)
+        self._explorer_dock = ApiExplorerDock(self)
+        self._explorer_dock.step_selected.connect(self._open_step_in_tab)
+        self._explorer_dock.context_selected.connect(self._on_context_selected)
+        self._explorer_dock.item_deleted.connect(self._on_item_deleted_refresh)
+        self._explorer_dock.export_docs_requested.connect(self._export_html_docs)
         self._add_dock(self._explorer_dock, Qt.DockWidgetArea.LeftDockWidgetArea, "Explorer")
-        self._history_dock = ApiHistoryDock(self); self._history_dock.request_restored.connect(self._open_step_in_tab)
-        self._add_dock(self._history_dock, Qt.DockWidgetArea.LeftDockWidgetArea, "History"); self.tabifyDockWidget(self._explorer_dock, self._history_dock)
         
-        # 2. Assertions, Extractions, Pipeline
+        # 2. Assertions, Extractions, Pipeline (Right Side)
         self._assert_form = ApiAssertionForm(); self._assert_form.added.connect(self._on_assertion_added); self._assert_form.deleted.connect(self._on_assertion_deleted); self._assert_form.edited.connect(self._on_assertion_edited); self._assert_dock = QDockWidget("Assertions", self); self._assert_dock.setWidget(self._assert_form); self._add_dock(self._assert_dock, Qt.DockWidgetArea.RightDockWidgetArea, "Assertions")
         self._extract_form = ApiExtractionForm(); self._extract_form.added.connect(self._on_extraction_added); self._extract_form.deleted.connect(self._on_extraction_deleted); self._extract_form.edited.connect(self._on_extraction_edited); self._extract_dock = QDockWidget("Extractions", self); self._extract_dock.setWidget(self._extract_form); self._add_dock(self._extract_dock, Qt.DockWidgetArea.RightDockWidgetArea, "Extractions")
         self._pipe_form = ApiPipelineForm(); self._pipe_form.added.connect(self._on_pipeline_added); self._pipe_form.deleted.connect(self._on_pipeline_deleted); self._pipe_form.edited.connect(self._on_pipeline_edited); self._pipe_dock = QDockWidget("Pipeline", self); self._pipe_dock.setWidget(self._pipe_form); self._add_dock(self._pipe_dock, Qt.DockWidgetArea.RightDockWidgetArea, "Pipeline")
         self.tabifyDockWidget(self._assert_dock, self._extract_dock); self.tabifyDockWidget(self._extract_dock, self._pipe_dock); self._assert_dock.raise_()
         
-        # 3. Code, Map & Variables
-        self._code_dock = ApiCodeDock(self); self._code_dock.code_modified.connect(self._on_manual_code_edit); self._add_dock(self._code_dock, Qt.DockWidgetArea.BottomDockWidgetArea, "PyShaft Code")
-        self._diagram_dock = ApiDiagramDock(self); self._diagram_dock.step_selected.connect(self._open_step_in_tab); self._add_dock(self._diagram_dock, Qt.DockWidgetArea.BottomDockWidgetArea, "Workflow Map")
-        self._variable_manager = ApiVariableManager(self); self._variable_manager.variables_changed.connect(self._on_builder_changed); self._add_dock(self._variable_manager, Qt.DockWidgetArea.BottomDockWidgetArea, "Variables")
-        self.tabifyDockWidget(self._code_dock, self._diagram_dock); self.tabifyDockWidget(self._diagram_dock, self._variable_manager); self._diagram_dock.raise_()
+        # 3. Central Views (Added as Tabs instead of Docks)
+        self._variable_manager = ApiVariableManager(self); self._variable_manager.variables_changed.connect(self._on_builder_changed)
+        self._main_tabs.addTab(self._variable_manager, "📊 Variables")
+        
+        self._diagram_dock_widget = ApiDiagramDock(self); self._diagram_dock_widget.step_selected.connect(self._open_step_in_tab)
+        self._main_tabs.addTab(self._diagram_dock_widget, "🗺 Workflow Map")
+        
+        self._code_dock_widget = ApiCodeDock(self); self._code_dock_widget.code_modified.connect(self._on_manual_code_edit)
+        self._main_tabs.addTab(self._code_dock_widget, "🐍 PyShaft Code")
+        
+        self._history_dock_widget = ApiHistoryDock(self); self._history_dock_widget.request_restored.connect(self._open_step_in_tab)
+        self._main_tabs.addTab(self._history_dock_widget, "🕒 History")
 
         # Hide docks by default (except Explorer)
         for dock in self._docks:
@@ -226,24 +269,23 @@ class ApiMainWindow(QMainWindow):
     def toggle_explorer(self):
         self._explorer_dock.setVisible(not self._explorer_dock.isVisible())
         self._btn_toggle_explorer.setChecked(self._explorer_dock.isVisible())
-
-    def toggle_code(self):
-        self._code_dock.setVisible(not self._code_dock.isVisible())
-        self._btn_toggle_code.setChecked(self._code_dock.isVisible())
-
-    def toggle_map(self):
-        self._diagram_dock.setVisible(not self._diagram_dock.isVisible())
-        self._btn_toggle_map.setChecked(self._diagram_dock.isVisible())
-
-    def toggle_vars(self):
-        self._variable_manager.setVisible(not self._variable_manager.isVisible())
-        self._btn_toggle_vars.setChecked(self._variable_manager.isVisible())
+ 
+    def _switch_mode(self, index: int) -> None:
+        self._main_tabs.setCurrentIndex(index)
+        if index == 4: # History
+             self._history_dock_widget.refresh_history()
 
     def _build_menu(self) -> None:
         menubar = self.menuBar(); file_menu = menubar.addMenu("&File")
         file_menu.addAction("🆕 New Workflow", self._new_workflow); file_menu.addSeparator()
         file_menu.addAction("📂 Open Workflow...", self._open_workflow); file_menu.addAction("💾 Save Workflow...", self._save_workflow); file_menu.addSeparator()
-        file_menu.addAction("🌐 Import cURL...", self._import_curl); file_menu.addAction("📮 Import Postman...", self._import_postman); file_menu.addAction("🐍 Import PyShaft .py...", self._import_pyshaft_script); file_menu.addSeparator()
+        file_menu.addAction("🌐 Import cURL...", self._import_curl)
+        file_menu.addAction("📮 Import Postman Collection...", self._import_postman)
+        file_menu.addAction("📮 Import Postman Environment...", self._import_postman_env)
+        file_menu.addAction("🐍 Import PyShaft .py...", self._import_pyshaft_script)
+        file_menu.addSeparator()
+        file_menu.addAction("📄 Export Workflow Docs (HTML)...", lambda: self._export_html_docs())
+        file_menu.addSeparator()
         file_menu.addAction("🗑 Clear History", self._clear_history); file_menu.addAction("❌ Exit", self.close)
         edit_menu = menubar.addMenu("&Edit"); edit_menu.addAction("🔍 Global Search...", QKeySequence("Ctrl+Shift+F"), self._open_search)
         view_menu = menubar.addMenu("&View"); 
@@ -252,13 +294,34 @@ class ApiMainWindow(QMainWindow):
     def _build_toolbar(self) -> None:
         tb = QToolBar("Main"); tb.setMovable(False); tb.setStyleSheet(f"background: {COLORS['bg_dark']}; padding: 4px;")
         btn_send = QPushButton("▶ Send"); btn_send.setStyleSheet(f"background: {COLORS['accent_green']}22; color: {COLORS['accent_green']}; font-weight: 700; padding: 6px 14px;"); btn_send.clicked.connect(self._run_current_tab); tb.addWidget(btn_send)
-        tb.addSeparator(); self._env_combo = QComboBox(); self._env_combo.addItem("Default", -1); self._env_combo.currentIndexChanged.connect(self._on_env_changed); tb.addWidget(QLabel(" 🌍 ")); tb.addWidget(self._env_combo)
+        tb.addSeparator()
+        self._env_combo = QComboBox()
+        self._env_combo.addItem("Default", -1)
+        self._env_combo.currentIndexChanged.connect(self._on_env_changed)
+        tb.addWidget(QLabel(" 🌍 "))
+        tb.addWidget(self._env_combo)
+
+        self._btn_remove_env = QPushButton("🗑")
+        self._btn_remove_env.setToolTip("Remove selected environment")
+        self._btn_remove_env.setFixedWidth(28)
+        self._btn_remove_env.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {COLORS['text_muted']}; border: none;"
+            f" font-size: 13px; border-radius: 3px; }}"
+            f" QPushButton:hover {{ color: {COLORS['error']}; background: {COLORS['bg_hover']}; }}"
+        )
+        self._btn_remove_env.setEnabled(False)  # disabled on Default
+        self._btn_remove_env.clicked.connect(self._remove_current_env)
+        tb.addWidget(self._btn_remove_env)
         
         tb.addSeparator()
         self._btn_toggle_explorer = QPushButton("🗂 Explorer"); self._btn_toggle_explorer.setCheckable(True); self._btn_toggle_explorer.setChecked(True); self._btn_toggle_explorer.clicked.connect(lambda _: self.toggle_explorer()); tb.addWidget(self._btn_toggle_explorer)
-        self._btn_toggle_vars = QPushButton("📋 Variables"); self._btn_toggle_vars.setCheckable(True); self._btn_toggle_vars.setChecked(False); self._btn_toggle_vars.clicked.connect(lambda _: self.toggle_vars()); tb.addWidget(self._btn_toggle_vars)
-        self._btn_toggle_map = QPushButton("🗺 Map"); self._btn_toggle_map.setCheckable(True); self._btn_toggle_map.setChecked(False); self._btn_toggle_map.clicked.connect(lambda _: self.toggle_map()); tb.addWidget(self._btn_toggle_map)
-        self._btn_toggle_code = QPushButton("🐍 Code"); self._btn_toggle_code.setCheckable(True); self._btn_toggle_code.setChecked(False); self._btn_toggle_code.clicked.connect(lambda _: self.toggle_code()); tb.addWidget(self._btn_toggle_code)
+        
+        tb.addSeparator()
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItems(["🛠 Builder", "📊 Variables", "🗺 Workflow Map", "🐍 PyShaft Code", "🕒 History"])
+        self._mode_combo.currentIndexChanged.connect(self._switch_mode)
+        tb.addWidget(QLabel(" 🚀 Mode: "))
+        tb.addWidget(self._mode_combo)
         
         tb.addSeparator(); btn_export_md = QPushButton("📝 Export MD"); btn_export_md.clicked.connect(self._export_to_markdown); tb.addWidget(btn_export_md)
         tb.addSeparator(); btn_add = QPushButton("➕ Request"); btn_add.clicked.connect(self._add_root_request); tb.addWidget(btn_add); self.addToolBar(tb)
@@ -277,7 +340,7 @@ class ApiMainWindow(QMainWindow):
 
     def _clear_history(self) -> None:
         """Clear history log."""
-        self._history_dock.clear_history(); self._status_label.setText("History cleared.")
+        self._history_dock_widget.clear_history(); self._status_label.setText("History cleared.")
 
     def _open_search(self) -> None:
         """Open global search dialog."""
@@ -307,7 +370,18 @@ class ApiMainWindow(QMainWindow):
     def _on_builder_changed(self) -> None:
         b = self._tabs.currentWidget()
         if isinstance(b, ApiRequestBuilder): b.save_to_step()
-        self._code_dock.update_code(self._workflow); self._diagram_dock.update_diagram(self._workflow); self._update_tab_names()
+        self._code_dock_widget.update_code(self._workflow, scope=self._current_scope)
+        self._diagram_dock_widget.update_diagram(self._workflow); self._update_tab_names()
+        self._save_last_session()
+
+    def _on_context_selected(self, item) -> None:
+        """Update code dock scope when the user clicks an item in the Explorer."""
+        from pyshaft.recorder.api_inspector.api_models import ApiRequestStep, ApiFolder
+        if isinstance(item, (ApiRequestStep, ApiFolder)):
+            self._current_scope = item
+        else:
+            self._current_scope = None  # Fall back to whole workflow
+        self._code_dock_widget.update_code(self._workflow, scope=self._current_scope)
 
     def _on_assertion_added(self, a: ApiAssertion) -> None:
         b = self._tabs.currentWidget()
@@ -352,6 +426,7 @@ class ApiMainWindow(QMainWindow):
         if isinstance(b, ApiRequestBuilder) and old in b.step.pipeline:
             idx = b.step.pipeline.index(old); b.step.pipeline[idx] = new; self._on_builder_changed(); self._pipe_form.load_data(b.step.pipeline)
 
+
     def _on_pipeline_deleted(self, p: PipelineStep) -> None:
         b = self._tabs.currentWidget()
         if isinstance(b, ApiRequestBuilder) and p in b.step.pipeline:
@@ -370,6 +445,16 @@ class ApiMainWindow(QMainWindow):
         if mode == "contains": t = AssertionType.JSON_PATH_CONTAINS
         elif mode == "type": t = AssertionType.JSON_PATH_TYPE
         new_a = ApiAssertion(type=t, path=path, expected=str(val)); self._on_assertion_added(new_a); self._assert_dock.show(); self._assert_dock.raise_()
+
+    def _on_schema_assertion(self, path: str, schema_json: str) -> None:
+        """Create a JSON_SCHEMA assertion from the generated schema."""
+        b = self._tabs.currentWidget()
+        if not isinstance(b, ApiRequestBuilder): return
+        from pyshaft.recorder.api_inspector.api_models import AssertionType
+        new_a = ApiAssertion(type=AssertionType.JSON_SCHEMA, path=path, expected=schema_json)
+        self._on_assertion_added(new_a)
+        self._assert_dock.show(); self._assert_dock.raise_()
+        self._status_label.setText(f"Schema assertion added for {path}")
 
     def _on_quick_extraction(self, path: str, value: Any) -> None:
         b = self._tabs.currentWidget()
@@ -398,9 +483,9 @@ class ApiMainWindow(QMainWindow):
             self._resp_time_label.setText(f"{dur:.0f} ms")
             
             self._response_viewer.set_data(body)
-            self._history_dock.add_entry(step)
+            self._history_dock_widget.add_entry(step)
         self._refresh_explorer()
-        self._code_dock.update_code(self._workflow)
+        self._code_dock_widget.update_code(self._workflow, scope=self._current_scope)
 
     def _run_current_tab(self) -> None:
         b = self._tabs.currentWidget()
@@ -408,8 +493,11 @@ class ApiMainWindow(QMainWindow):
             b.save_to_step(); self._status_label.setText(f"Sending {b.step.name}..."); threading.Thread(target=self._execute_step, args=(b.step,), daemon=True).start()
 
     def _execute_step(self, step: ApiRequestStep) -> None:
-        url = self._resolve_url(step); headers = self._resolve_headers(step); payload = self._resolve_payload(step); start = time.time()
+        start = time.time()
         try:
+            url = self._resolve_url(step)
+            headers = self._resolve_headers(step)
+            payload = self._resolve_payload(step)
             m = step.method.value.upper(); kwargs = {"headers": headers, "timeout": 30}
             if m in ("POST", "PUT", "PATCH") and payload: kwargs["json"] = payload
             resp = self._session.request(m, url, **kwargs); dur = (time.time() - start) * 1000
@@ -417,7 +505,9 @@ class ApiMainWindow(QMainWindow):
             except: body = resp.text
             step.last_status, step.last_response, step.last_duration_ms = resp.status_code, body, dur
             self._handle_extractions(step, body); self._bridge.response_received.emit(resp.status_code, body, dur, "", step)
-        except Exception as e: self._bridge.response_received.emit(0, None, 0, str(e), step)
+        except Exception as e:
+            import traceback; logger.error(traceback.format_exc())
+            self._bridge.response_received.emit(0, None, 0, str(e), step)
 
     def _handle_extractions(self, step: ApiRequestStep, response: Any) -> None:
         if not step.extractions or not isinstance(response, (dict, list)): return
@@ -433,7 +523,90 @@ class ApiMainWindow(QMainWindow):
         if 0 <= idx < len(self._workflow.environments): vars.update(self._workflow.environments[idx].variables)
         return vars
 
+    # ── Dynamic variable resolution (Postman-compatible) ─────────────────────
+    _DYNAMIC_VAR_RE = re.compile(r"\{\{\$(\w+)\}\}")
+
+    def _resolve_dynamic_vars(self, text: str) -> str:
+        """Replace {{$variableName}} Postman-style built-ins with generated values.
+
+        Supported:
+          $randomInt            – random integer 0-1000
+          $randomIntRange(n,m)  – not yet; falls back to randomInt
+          $guid / $uuid         – random UUID v4
+          $timestamp            – Unix epoch seconds (integer)
+          $isoTimestamp         – ISO-8601 UTC timestamp
+          $randomFloat          – random float 0.0-1.0 (6 decimal places)
+          $randomBoolean        – true or false
+          $randomAlphaNumeric   – single random alphanumeric character
+          $randomHexadecimal    – #xxxxxx hex colour
+          $randomColor          – English colour name
+          $randomFirstName      – random first name
+          $randomLastName       – random last name
+          $randomFullName       – random full name
+          $randomEmail          – random email address
+          $randomUserName       – random username
+          $randomWord           – random English-ish word
+          $randomWords          – random phrase
+          $randomLoremWord      – random Lorem-style word
+          $randomUrl            – random URL
+          $randomCity           – random city name
+          $randomStreetAddress  – random street address
+          $randomCountry        – random country name
+          $randomCountryCode    – random ISO country code
+          $randomLatitude       – random latitude
+          $randomLongitude      – random longitude
+          $randomAbbreviation   – random abbreviation
+          $randomNoun           – random noun
+          $randomVerb           – random verb
+          $randomAdjective      – random adjective
+        """
+        _FIRST_NAMES = ["Alice", "Bob", "Charlie", "Diana", "Eve", "Frank", "Grace", "Hank", "Ivy", "Jack"]
+        _LAST_NAMES  = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Miller", "Davis", "Wilson", "Moore", "Taylor"]
+        _CITIES      = ["Cairo", "London", "Paris", "Tokyo", "Berlin", "Sydney", "Dubai", "Toronto", "Madrid", "Rome"]
+        _COUNTRIES   = ["Egypt", "United Kingdom", "France", "Japan", "Germany", "Australia", "UAE", "Canada", "Spain", "Italy"]
+        _CODES       = ["EG", "GB", "FR", "JP", "DE", "AU", "AE", "CA", "ES", "IT"]
+        _COLORS      = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "black", "white", "cyan"]
+        _WORDS       = ["apple", "river", "cloud", "forest", "stone", "ember", "thunder", "silver", "ocean", "drift"]
+        _NOUNS       = ["cat", "bridge", "fire", "wave", "mountain", "shadow", "dawn", "leaf", "spark", "mirror"]
+        _VERBS       = ["run", "jump", "fly", "swim", "sing", "dance", "climb", "build", "write", "think"]
+        _ADJS        = ["quick", "lazy", "bright", "dark", "cold", "warm", "sharp", "soft", "loud", "silent"]
+
+        def _gen(name: str) -> str:
+            n = name.lower()
+            if n == "randomint":           return str(random.randint(0, 1000))
+            if n == "guid" or n == "uuid": return str(uuid.uuid4())
+            if n == "timestamp":           return str(int(time.time()))
+            if n == "isotimestamp":        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            if n == "randomfloat":         return f"{random.random():.6f}"
+            if n == "randomboolean":       return random.choice(["true", "false"])
+            if n == "randomalphanumeric":  return random.choice(string.ascii_letters + string.digits)
+            if n == "randomhexadecimal":   return "#{:06x}".format(random.randint(0, 0xFFFFFF))
+            if n == "randomcolor":         return random.choice(_COLORS)
+            if n == "randomfirstname":     return random.choice(_FIRST_NAMES)
+            if n == "randomlastname":      return random.choice(_LAST_NAMES)
+            if n == "randomfullname":      return f"{random.choice(_FIRST_NAMES)} {random.choice(_LAST_NAMES)}"
+            if n == "randomemail":         fn = random.choice(_FIRST_NAMES).lower(); ln = random.choice(_LAST_NAMES).lower(); return f"{fn}.{ln}{random.randint(1, 999)}@example.com"
+            if n == "randomusername":      fn = random.choice(_FIRST_NAMES).lower(); return f"{fn}{random.randint(100, 9999)}"
+            if n in ("randomword", "randomloremword"): return random.choice(_WORDS)
+            if n == "randomwords":         return " ".join(random.choices(_WORDS, k=3))
+            if n == "randomurl":           w = random.choice(_WORDS); return f"https://www.{w}.com"
+            if n == "randomcity":          return random.choice(_CITIES)
+            if n == "randomstreetaddress": return f"{random.randint(1, 999)} {random.choice(_WORDS).title()} St"
+            if n == "randomcountry":       return random.choice(_COUNTRIES)
+            if n == "randomcountrycode":   return random.choice(_CODES)
+            if n == "randomlatitude":      return f"{random.uniform(-90, 90):.6f}"
+            if n == "randomlongitude":     return f"{random.uniform(-180, 180):.6f}"
+            if n == "randomabbreviation":  return "".join(random.choices(string.ascii_uppercase, k=random.randint(2, 4)))
+            if n == "randomnoun":          return random.choice(_NOUNS)
+            if n == "randomverb":          return random.choice(_VERBS)
+            if n == "randomadjective":     return random.choice(_ADJS)
+            # Unknown — leave as-is
+            return "{{$" + name + "}}"
+
+        return self._DYNAMIC_VAR_RE.sub(lambda m: _gen(m.group(1)), text)
+
     def _resolve_url(self, step: ApiRequestStep) -> str:
+        import urllib.parse
         url = step.url or step.endpoint; idx = self._workflow.current_environment_index
         env_base = self._workflow.environments[idx].base_url if 0 <= idx < len(self._workflow.environments) else ""
         base = env_base or self._workflow.base_url
@@ -442,14 +615,39 @@ class ApiMainWindow(QMainWindow):
         for vn, vv in active_vars.items():
             actual = os.environ.get(vv[1:], vv) if isinstance(vv, str) and vv.startswith("$") else vv
             url = url.replace(f"{{{{{vn}}}}}", str(actual))
+        # Resolve built-in dynamic variables (e.g. {{$randomInt}})
+        url = self._resolve_dynamic_vars(url)
+
+        # Ensure url has a scheme so requests library doesn't fail
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = f"http://{url}"
+
+        # Append plain query params from the Params tab (with variable substitution)
+        query_params: dict = getattr(step, "query_params", {})
+        if query_params:
+            parsed = urllib.parse.urlsplit(url)
+            qs = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+            for k, v in query_params.items():
+                # Apply variable substitution to key/value
+                for vn, vv in active_vars.items():
+                    actual = os.environ.get(vv[1:], vv) if isinstance(vv, str) and vv.startswith("$") else vv
+                    k = k.replace(f"{{{{{vn}}}}}", str(actual))
+                    v = v.replace(f"{{{{{vn}}}}}", str(actual))
+                k = self._resolve_dynamic_vars(k)
+                v = self._resolve_dynamic_vars(v)
+                qs[k] = [v]
+            new_query = urllib.parse.urlencode({k: v[0] for k, v in qs.items()})
+            url = urllib.parse.urlunsplit(parsed._replace(query=new_query))
+
         return url
 
     def _resolve_headers(self, step: ApiRequestStep) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}; headers.update(step.headers); active_vars = self._get_active_variables()
-        for k, v in headers.items():
+        for k, v in list(headers.items()):
             for vn, vv in active_vars.items():
                 actual = os.environ.get(vv[1:], vv) if isinstance(vv, str) and vv.startswith("$") else vv
-                headers[k] = v.replace(f"{{{{{vn}}}}}", str(actual))
+                v = v.replace(f"{{{{{vn}}}}}", str(actual))
+            headers[k] = self._resolve_dynamic_vars(v)
         return headers
 
     def _resolve_payload(self, step: ApiRequestStep) -> Any:
@@ -458,6 +656,8 @@ class ApiMainWindow(QMainWindow):
         for vn, vv in active_vars.items():
             actual = os.environ.get(vv[1:], vv) if isinstance(vv, str) and vv.startswith("$") else vv
             ps = ps.replace(f"{{{{{vn}}}}}", str(actual))
+        # Resolve built-in dynamic variables (e.g. {{$randomInt}})
+        ps = self._resolve_dynamic_vars(ps)
         try: return json.loads(ps)
         except: return ps
 
@@ -469,6 +669,25 @@ class ApiMainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Save", "workflow.json", "JSON (*.json)")
         if path: save_workflow(self._workflow, path)
 
+    def _export_html_docs(self, item=None) -> None:
+        """Export HTML docs for the entire workflow, or a specific folder/request."""
+        target_item = item or self._workflow
+        default_name = "workflow_docs.html"
+        if hasattr(target_item, "name") and target_item.name:
+            default_name = f"{target_item.name.replace(' ', '_').lower()}_docs.html"
+            
+        path, _ = QFileDialog.getSaveFileName(self, "Export HTML Docs", default_name, "HTML Files (*.html)")
+        if path:
+            try:
+                from pyshaft.recorder.api_inspector.api_doc_generator import generate_html_docs
+                active_vars = self._get_active_variables()
+                generate_html_docs(target_item, path, variables=active_vars)
+                self._status_label.setText(f"✓ Exported HTML docs to {path}")
+                import webbrowser
+                webbrowser.open(f"file:///{path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to generate documentation:\n{e}")
+
     def _import_curl(self) -> None:
         text, ok = QInputDialog.getMultiLineText(self, "cURL", "Paste:")
         if ok and text:
@@ -476,10 +695,50 @@ class ApiMainWindow(QMainWindow):
             step = parse_curl(text); self._workflow.items.append(step); self._refresh_explorer(); self._open_step_in_tab(step)
 
     def _import_postman(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Postman", "", "JSON (*.json)")
+        path, _ = QFileDialog.getOpenFileName(self, "Postman Collection", "", "JSON (*.json)")
         if path:
-            from pyshaft.recorder.api_inspector.api_importers import parse_postman_collection
-            self._workflow.items.extend(parse_postman_collection(path)); self._refresh_explorer()
+            try:
+                from pyshaft.recorder.api_inspector.api_importers import parse_postman_collection_full
+                result = parse_postman_collection_full(path)
+                
+                # Auto-create an environment for this collection's variables
+                if result.variables:
+                    from pyshaft.recorder.api_inspector.api_models import ApiEnvironment
+                    env_name = f"{result.collection_name} Env"
+                    new_env = ApiEnvironment(name=env_name, variables=result.variables)
+                    self._workflow.environments.append(new_env)
+                    # Set the new environment as active
+                    self._workflow.current_environment_index = len(self._workflow.environments) - 1
+                
+                # Add imported items
+                self._workflow.items.extend(result.items)
+                
+                self._refresh_explorer()
+                self._status_label.setText(f"Imported Postman Collection: {result.collection_name}")
+            except Exception as e:
+                QMessageBox.critical(self, "Import Error", f"Failed to import Postman Collection:\n{e}")
+
+    def _import_postman_env(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Postman Environment", "", "JSON (*.json)")
+        if path:
+            try:
+                from pyshaft.recorder.api_inspector.api_importers import parse_postman_environment, scan_and_register_template_vars
+                variables = parse_postman_environment(path)
+                
+                # Scan current workflow to add missing template variables into this environment
+                scan_and_register_template_vars(self._workflow.items, variables)
+                
+                import os
+                env_name = os.path.splitext(os.path.basename(path))[0]
+                
+                from pyshaft.recorder.api_inspector.api_models import ApiEnvironment
+                new_env = ApiEnvironment(name=env_name, variables=variables)
+                self._workflow.environments.append(new_env)
+                
+                self._refresh_explorer()
+                self._status_label.setText(f"Imported Postman Environment: {env_name}")
+            except Exception as e:
+                QMessageBox.critical(self, "Import Error", f"Failed to import Postman Environment:\n{e}")
 
     def _import_pyshaft_script(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Import PyShaft", "", "Python (*.py)")
@@ -490,7 +749,35 @@ class ApiMainWindow(QMainWindow):
             except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
     def _on_env_changed(self, index: int) -> None:
-        self._workflow.current_environment_index = self._env_combo.itemData(index); self._variable_manager.set_workflow(self._workflow)
+        self._workflow.current_environment_index = self._env_combo.itemData(index)
+        self._variable_manager.set_workflow(self._workflow)
+        # Enable remove button only when a real (non-Default) env is selected
+        is_real_env = self._env_combo.itemData(index) != -1
+        self._btn_remove_env.setEnabled(is_real_env)
+
+    def _remove_current_env(self) -> None:
+        """Remove the currently selected environment from the workflow."""
+        idx = self._env_combo.currentIndex()
+        env_index: int = self._env_combo.itemData(idx)
+        if env_index == -1:
+            return  # Can't remove Default
+        env_name = self._env_combo.currentText()
+        reply = QMessageBox.question(
+            self, "Remove Environment",
+            f"Remove environment '{env_name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        # Remove from model
+        if 0 <= env_index < len(self._workflow.environments):
+            self._workflow.environments.pop(env_index)
+        # Reset active env to Default
+        self._workflow.current_environment_index = -1
+        self._refresh_env_list()
+        self._variable_manager.set_workflow(self._workflow)
+        self._status_label.setText(f"Removed environment: {env_name}")
+        self._save_last_session()
 
     def _manage_environments(self) -> None:
         n, ok = QInputDialog.getText(self, "Env", "Name:")
@@ -509,7 +796,8 @@ class ApiMainWindow(QMainWindow):
     def _refresh_explorer(self, refresh_explorer: bool = True) -> None:
         if refresh_explorer:
             self._explorer_dock.set_workflow(self._workflow)
-        self._diagram_dock.update_diagram(self._workflow)
+        self._diagram_dock_widget.update_diagram(self._workflow)
+        self._save_last_session()
         self._update_tab_names(); self._refresh_env_list(); self._variable_manager.set_workflow(self._workflow)
 
     def _update_tab_names(self) -> None:
@@ -518,6 +806,7 @@ class ApiMainWindow(QMainWindow):
             if isinstance(builder, ApiRequestBuilder): self._tabs.setTabText(i, builder.step.name)
 
     def _open_step_in_tab(self, step: ApiRequestStep) -> None:
+        self._main_tabs.setCurrentIndex(0) # Switch to Builder
         for i in range(self._tabs.count()):
             builder = self._tabs.widget(i)
             if isinstance(builder, ApiRequestBuilder) and builder.step == step:
@@ -529,7 +818,15 @@ class ApiMainWindow(QMainWindow):
         for i in range(self._tabs.count() - 1, -1, -1):
             builder = self._tabs.widget(i)
             if isinstance(builder, ApiRequestBuilder) and builder.step not in self._workflow.all_steps: self._tabs.removeTab(i)
-        self._refresh_explorer(refresh_explorer=refresh_explorer)
+        # Reset scope if the scoped item was deleted
+        if self._current_scope not in self._workflow.all_steps:
+            from pyshaft.recorder.api_inspector.api_models import ApiFolder
+            if not isinstance(self._current_scope, ApiFolder) or self._current_scope not in [
+                f for f in self._workflow.items if isinstance(f, ApiFolder)
+            ]:
+                self._current_scope = None
+        self._refresh_explorer(refresh_explorer=refresh_explorer); self._save_last_session()
+        self._code_dock_widget.update_code(self._workflow, scope=self._current_scope)
 
     def _add_root_request(self) -> None:
         step = ApiRequestStep(name=f"Request {len(self._workflow.all_steps) + 1}")
@@ -585,7 +882,10 @@ class ApiMainWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         if index >= 0:
             builder = self._tabs.widget(index)
-            if isinstance(builder, ApiRequestBuilder): self._load_step_context(builder.step); self._code_dock.update_code(self._workflow)
+            if isinstance(builder, ApiRequestBuilder):
+                self._current_scope = builder.step
+                self._load_step_context(builder.step)
+                self._code_dock_widget.update_code(self._workflow, scope=self._current_scope)
 
     def _on_tab_close_requested(self, index: int) -> None: self._tabs.removeTab(index)
 

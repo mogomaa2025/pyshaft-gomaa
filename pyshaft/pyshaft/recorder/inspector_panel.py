@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QGridLayout, QRadioButton, QButtonGroup,
-    QLineEdit, QGroupBox, QCheckBox, QInputDialog, QComboBox,
+    QLineEdit, QGroupBox, QCheckBox, QInputDialog, QComboBox, QFileDialog, QMessageBox,
 )
 
 from pyshaft.recorder.models import RecordedStep, LocatorSuggestion
@@ -41,6 +41,8 @@ _ASSERTIONS = [
     ("assert_enabled", ICONS["enabled"], "Enabled"),
     ("assert_disabled", ICONS["disabled"], "Disabled"),
     ("assert_checked", ICONS["check"], "Checked"),
+    ("assert_snapshot", ICONS["snapshot"], "Snapshot"),
+    ("assert_aria_snapshot", "📐", "Aria Snap"),
     ("assert_title", ICONS["title"], "Title..."),
     ("assert_url", ICONS["url"], "URL..."),
     ("assert_contain_text", "⊃Aa", "Contains Text..."),
@@ -69,6 +71,7 @@ class InspectorPanel(QWidget):
     """Right sidebar showing element info, actions, assertions, and locator choices."""
 
     step_requested = pyqtSignal(object)  # RecordedStep
+    snapshot_capture_requested = pyqtSignal(str, object)  # (name, element_meta)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -78,6 +81,28 @@ class InspectorPanel(QWidget):
         self._selected_modifier: str | None = None
         self._selected_index: int | None = None
         self._setup_ui()
+
+    def _create_aria_tree_section(self) -> QGroupBox:
+        """Create the Aria Tree visualization section."""
+        group = QGroupBox("📐 ARIA TREE")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(10, 20, 10, 10)
+        layout.setSpacing(6)
+        
+        self._aria_label = QLabel("—")
+        self._aria_label.setStyleSheet(f"""
+            color: {COLORS['accent_green']};
+            font-family: {FONTS['family_mono']};
+            font-size: 11px;
+            background-color: {COLORS['bg_darkest']};
+            padding: 8px;
+            border-radius: 4px;
+        """)
+        self._aria_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._aria_label.setWordWrap(True)
+        layout.addWidget(self._aria_label)
+        
+        return group
 
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -116,6 +141,10 @@ class InspectorPanel(QWidget):
         # Element Info Section
         self._info_group = self._create_element_info_section()
         self._content_layout.addWidget(self._info_group)
+        
+        # Aria Tree Section
+        self._aria_group = self._create_aria_tree_section()
+        self._content_layout.addWidget(self._aria_group)
 
         # Actions Section
         self._actions_group = self._create_actions_section()
@@ -153,29 +182,31 @@ class InspectorPanel(QWidget):
         """Create the Element Information section."""
         group = QGroupBox("ELEMENT INFO")
         layout = QVBoxLayout(group)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 20, 10, 10)
+        layout.setSpacing(6)
 
         self._info_labels = {}
         fields = [
             ("tag", "Tag"), ("id", "ID"), ("class", "Class"),
-            ("text", "Text"), ("role", "Role"), ("placeholder", "Placeholder"),
-            ("aria-label", "Aria Label"), ("data-testid", "Test ID"),
-            ("name", "Name"), ("type", "Type"), ("href", "Href"),
-            ("value", "Value"),
+            ("role", "Role"), ("data-testid", "Test ID"),
+            ("text", "Text"), ("value", "Value"), ("href", "Href"),
         ]
 
         for key, label_text in fields:
             row = QHBoxLayout()
-            lbl = QLabel(f"{label_text}:")
-            lbl.setFixedWidth(80)
-            lbl.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: {FONTS['size_sm']};")
+            lbl = QLabel(label_text)
+            lbl.setFixedWidth(60)
+            lbl.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px; font-weight: bold; text-transform: uppercase;")
             row.addWidget(lbl)
 
             val = QLabel("—")
             val.setStyleSheet(f"""
                 color: {COLORS['text_primary']};
                 font-family: {FONTS['family_mono']};
-                font-size: {FONTS['size_sm']};
+                font-size: 11px;
+                background-color: {COLORS['bg_darkest']};
+                padding: 2px 6px;
+                border-radius: 3px;
             """)
             val.setWordWrap(True)
             val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -188,55 +219,65 @@ class InspectorPanel(QWidget):
 
     def _create_actions_section(self) -> QGroupBox:
         """Create the Actions button grid."""
-        group = QGroupBox("ACTIONS")
+        group = QGroupBox(f"{ICONS['click']}  ACTIONS")
         grid = QGridLayout(group)
+        grid.setContentsMargins(8, 20, 8, 8)
         grid.setSpacing(6)
 
         self._action_buttons = {}
         for i, (action_id, icon, label) in enumerate(_ACTIONS):
             btn = QPushButton(f"{icon} {label}")
             btn.setProperty("class", "action_btn")
+            btn.setFixedHeight(28)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setToolTip(f"w.{action_id}()")
             btn.clicked.connect(lambda checked, a=action_id: self._on_action_clicked(a))
-            grid.addWidget(btn, i // 3, i % 3)
+            grid.addWidget(btn, i // 2, i % 2) # 2 columns for better readability
             self._action_buttons[action_id] = btn
 
         return group
 
     def _create_assertions_section(self) -> QGroupBox:
         """Create the Assertions button grid."""
-        group = QGroupBox("ASSERTIONS")
+        group = QGroupBox(f"{ICONS['assert']}  ASSERTIONS")
         grid = QGridLayout(group)
+        grid.setContentsMargins(8, 20, 8, 8)
         grid.setSpacing(6)
 
         self._assert_buttons = {}
         for i, (assert_id, icon, label) in enumerate(_ASSERTIONS):
             btn = QPushButton(f"{icon} {label}")
             btn.setProperty("class", "assert_btn")
+            btn.setFixedHeight(28)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setToolTip(f"w.{assert_id}()")
             btn.clicked.connect(lambda checked, a=assert_id: self._on_assert_clicked(a))
-            grid.addWidget(btn, i // 3, i % 3)
+            grid.addWidget(btn, i // 2, i % 2) # 2 columns
             self._assert_buttons[assert_id] = btn
 
         return group
 
+
     def _create_extraction_section(self) -> QGroupBox:
         """Create the Data Extraction button grid."""
-        group = QGroupBox("DATA EXTRACTION")
+        group = QGroupBox(f"{ICONS['extract']}  EXTRACTION")
         grid = QGridLayout(group)
+        grid.setContentsMargins(8, 20, 8, 8)
         grid.setSpacing(6)
 
         self._extract_buttons = {}
         for i, (extract_id, icon, label) in enumerate(_EXTRACTIONS):
             btn = QPushButton(f"{icon} {label}")
             btn.setToolTip(f"w.{extract_id}()")
+            btn.setFixedHeight(28)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {COLORS['bg_card']};
                     border: 1px solid {COLORS['border']};
                     border-radius: 4px;
-                    padding: 4px 10px;
-                    font-size: {FONTS['size_sm']};
+                    padding: 4px 8px;
+                    font-size: 11px;
                 }}
                 QPushButton:hover {{
                     background-color: {COLORS['accent_orange']}22;
@@ -244,15 +285,16 @@ class InspectorPanel(QWidget):
                 }}
             """)
             btn.clicked.connect(lambda checked, a=extract_id: self._on_extract_clicked(a))
-            grid.addWidget(btn, i // 3, i % 3)
+            grid.addWidget(btn, i // 2, i % 2)
             self._extract_buttons[extract_id] = btn
 
         return group
 
     def _create_locator_section(self) -> QGroupBox:
         """Create the Locator selection section with radio buttons."""
-        group = QGroupBox("LOCATOR STRATEGY")
+        group = QGroupBox(f"{ICONS['nav']}  LOCATOR STRATEGY")
         layout = QVBoxLayout(group)
+        layout.setContentsMargins(8, 20, 8, 8)
         layout.setSpacing(4)
 
         self._locator_radio_group = QButtonGroup(self)
@@ -260,15 +302,16 @@ class InspectorPanel(QWidget):
         self._locator_container = layout
 
         # Placeholder label shown when no element selected
-        self._no_locator_label = QLabel("Select an element to see locator options")
+        self._no_locator_label = QLabel("Select an element to see options")
         self._no_locator_label.setStyleSheet(f"""
             color: {COLORS['text_muted']};
-            font-size: {FONTS['size_sm']};
+            font-size: 11px;
             padding: 8px;
         """)
         layout.addWidget(self._no_locator_label)
 
         return group
+
 
     def _create_modifier_section(self) -> QGroupBox:
         """Create the modifier toggles (Exact/Contain/Starts/nth)."""
@@ -336,13 +379,22 @@ class InspectorPanel(QWidget):
                 label.setStyleSheet(f"""
                     color: {COLORS['text_primary']};
                     font-family: {FONTS['family_mono']};
-                    font-size: {FONTS['size_sm']};
+                    font-size: 11px;
+                    background-color: {COLORS['bg_darkest']};
+                    padding: 2px 6px;
+                    border-radius: 3px;
                 """)
             else:
                 label.setStyleSheet(f"""
                     color: {COLORS['text_muted']};
-                    font-size: {FONTS['size_sm']};
+                    font-size: 11px;
                 """)
+
+        # Update Aria Tree
+        from pyshaft.web import aria
+        tree = element_meta.get("aria_tree") or {}
+        yaml_text = aria.tree_to_yaml(tree) if tree else "—"
+        self._aria_label.setText(yaml_text)
 
         # Update locator radio buttons
         self._refresh_locators()
@@ -359,7 +411,9 @@ class InspectorPanel(QWidget):
         """Set the panel to its default "no element selected" state."""
         for label in self._info_labels.values():
             label.setText("—")
-            label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: {FONTS['size_sm']};")
+            label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
+        
+        self._aria_label.setText("—")
 
         # Disable action/assert/extract buttons until element selected
         for btn in self._action_buttons.values():
@@ -423,7 +477,9 @@ class InspectorPanel(QWidget):
                 return
             step.typed_text = text
         elif action_id == "select":
-            text, ok = QInputDialog.getText(self, "Select Option", "Enter option text or value:")
+            text, ok = QInputDialog.getText(
+                self, "Select Option", "Enter option text, value, or index:"
+            )
             if not ok:
                 return
             step.typed_text = text
@@ -458,7 +514,7 @@ class InspectorPanel(QWidget):
         elif assert_id in ("assert_selected_option", "assert_contain_selected"):
             default = self._element_meta.get("selected_text", "")
             text, ok = QInputDialog.getText(
-                self, "Expected Option", "Enter expected option text:", text=default
+                self, "Expected Option", "Enter expected option text, value, or index:", text=default
             )
             if not ok:
                 return
@@ -472,6 +528,40 @@ class InspectorPanel(QWidget):
             if not ok:
                 return
             step.assert_data_type_name = dtype
+        elif assert_id == "assert_snapshot":
+            from pathlib import Path
+            base_dir = Path("saved_snapshots")
+            existing = []
+            if base_dir.exists():
+                existing = [f.stem for f in base_dir.glob("*.png")]
+            
+            msg = "Select a baseline or 'Browse...' to pick a file:"
+            choices = ["Browse..."] + sorted(existing)
+            
+            choice, ok = QInputDialog.getItem(self, "Assert Snapshot", msg, choices, 0, True)
+            if not ok: return
+            
+            if choice == "Browse...":
+                path, _ = QFileDialog.getOpenFileName(self, "Select baseline file", str(base_dir), "Images (*.png)")
+                if not path: return
+                step.assert_expected = Path(path).stem
+            else:
+                step.assert_expected = choice
+                # Trigger capture
+                self.snapshot_capture_requested.emit(step.assert_expected, self._element_meta)
+        elif assert_id == "assert_aria_snapshot":
+            from pyshaft.web import aria
+            try:
+                tree = self._element_meta.get("aria_tree") or {}
+                yaml_text = aria.tree_to_yaml(tree)
+                text, ok = QInputDialog.getMultiLineText(
+                    self, "Aria Snapshot", "Verify semantic structure (YAML):", text=yaml_text
+                )
+                if not ok: return
+                step.assert_expected = text
+            except Exception as e:
+                QMessageBox.warning(self, "Aria Error", f"Failed to capture Aria Tree: {e}")
+                return
         elif assert_id == "assert_value":
             default = self._element_meta.get("value", "")
             text, ok = QInputDialog.getText(

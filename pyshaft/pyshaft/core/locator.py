@@ -293,33 +293,22 @@ class DualLocator:
                 return _select_best(elements, base_description, url, config)
 
         # 4. Resolve base elements
-        elements: list[WebElement] = []
-        strategies_tried: list[str] = []
+        resolution_map = {
+            "css": lambda: (_find_by_css(driver, raw), [f"css({raw})"]),
+            "xpath": lambda: (_find_by_xpath(driver, raw), [f"xpath({raw})"]),
+            "shadow": lambda: (
+                _find_shadow_dom(driver, _SHADOW_PATTERN.match(base_description.strip()).group(1).strip())
+                if _SHADOW_PATTERN.match(base_description.strip()) else ([], []),
+                [f"shadow({_SHADOW_PATTERN.match(base_description.strip()).group(1)})"] if _SHADOW_PATTERN.match(base_description.strip()) else []
+            ),
+            "unified": lambda: _resolve_unified(driver, base_description),
+            "semantic": lambda: _resolve_semantic(driver, raw),
+        }
 
-        match mode:
-            case "css":
-                elements = _find_by_css(driver, raw)
-                strategies_tried.append(f"css({raw})")
-                if elements:
-                    _cache.put(base_description, url, "css", raw)
+        elements, strategies_tried = resolution_map.get(mode, lambda: ([], []))()
 
-            case "xpath":
-                elements = _find_by_xpath(driver, raw)
-                strategies_tried.append(f"xpath({raw})")
-                if elements:
-                    _cache.put(base_description, url, "xpath", raw)
-
-            case "shadow":
-                shadow_sel = _SHADOW_PATTERN.match(base_description.strip())
-                if shadow_sel:
-                    elements = _find_shadow_dom(driver, shadow_sel.group(1).strip())
-                    strategies_tried.append(f"shadow({shadow_sel.group(1)})")
-
-            case "unified":
-                elements, strategies_tried = _resolve_unified(driver, base_description)
-
-            case "semantic":
-                elements, strategies_tried = _resolve_semantic(driver, raw)
+        if elements and mode in ("css", "xpath"):
+            _cache.put(base_description, url, mode, raw)
 
         # 5. Handle results + indexing
         if not elements:
@@ -357,36 +346,22 @@ class DualLocator:
 
     @staticmethod
     def resolve_all(driver: WebDriver, description: str) -> list[WebElement]:
-        """Resolve a locator description to all matching WebElements.
-
-        Args:
-            driver: The WebDriver instance.
-            description: Locator text.
-
-        Returns:
-            List of all matching WebElements (may be empty).
-        """
+        """Resolve a locator description to all matching WebElements."""
         mode = detect_mode(description)
         raw = strip_prefix(description)
 
-        match mode:
-            case "css":
-                return _find_by_css(driver, raw)
-            case "xpath":
-                return _find_by_xpath(driver, raw)
-            case "shadow":
-                shadow_sel = _SHADOW_PATTERN.match(description.strip())
-                if shadow_sel:
-                    return _find_shadow_dom(driver, shadow_sel.group(1).strip())
-                return []
-            case "unified":
-                elements, _ = _resolve_unified(driver, description)
-                return elements
-            case "semantic":
-                elements, _ = _resolve_semantic(driver, raw)
-                return elements
-            case _:
-                return []
+        resolution_map = {
+            "css": lambda: _find_by_css(driver, raw),
+            "xpath": lambda: _find_by_xpath(driver, raw),
+            "shadow": lambda: (
+                _find_shadow_dom(driver, _SHADOW_PATTERN.match(description.strip()).group(1).strip())
+                if _SHADOW_PATTERN.match(description.strip()) else []
+            ),
+            "unified": lambda: _resolve_unified(driver, description)[0],
+            "semantic": lambda: _resolve_semantic(driver, raw)[0],
+        }
+
+        return resolution_map.get(mode, lambda: [])()
 
     @staticmethod
     def clear_cache() -> None:

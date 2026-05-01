@@ -65,20 +65,64 @@ class ApiResponse:
         if not isinstance(items, list):
             raise TypeError(f"Path {path!r} is not an array")
         
-        found = False
-        for item in items:
-            if isinstance(item, dict):
-                match = True
-                for k, v in criteria.items():
-                    if item.get(k) != v:
-                        match = False
-                        break
-                if match:
-                    found = True
-                    break
+        found = any(
+            isinstance(item, dict) and all(item.get(k) == v for k, v in criteria.items())
+            for item in items
+        )
         
         if not found:
             raise AssertionError(f"No object in {path!r} matches criteria {criteria!r}")
+        return self
+
+    def assert_schema(self, schema: dict, path: str = "$") -> ApiResponse:
+        """Assert that a JSON value at path matches a JSON Schema."""
+        try:
+            import jsonschema
+        except ImportError:
+            raise ImportError("jsonschema is required for assert_schema. Install with: pip install jsonschema")
+            
+        actual = self._get_by_path(path) if path != "$" else self.json_data
+        try:
+            jsonschema.validate(instance=actual, schema=schema)
+        except jsonschema.exceptions.ValidationError as e:
+            raise AssertionError(f"Schema validation failed at path {path!r}: {e.message}")
+        return self
+
+    def assert_partial_schema(self, schema: dict, ignore_keys: list[str], path: str = "$") -> ApiResponse:
+        """Assert that a JSON value at path matches a schema, ignoring specific keys.
+        
+        Args:
+            schema: The JSON Schema to validate against.
+            ignore_keys: List of keys to remove from the actual data before validation.
+            path: Optional JSONPath to the data to validate.
+        """
+        import copy
+        actual = self._get_by_path(path) if path != "$" else self.json_data
+        
+        # Deep copy to avoid mutating the original response data
+        data_to_validate = copy.deepcopy(actual)
+        
+        def _remove_keys(obj, keys):
+            if isinstance(obj, dict):
+                for k in list(obj.keys()):
+                    if k in keys:
+                        del obj[k]
+                    else:
+                        _remove_keys(obj[k], keys)
+            elif isinstance(obj, list):
+                for item in obj:
+                    _remove_keys(item, keys)
+
+        _remove_keys(data_to_validate, ignore_keys)
+        
+        try:
+            import jsonschema
+            jsonschema.validate(instance=data_to_validate, schema=schema)
+        except ImportError:
+            raise ImportError("jsonschema is required for schema validation. Install with: pip install jsonschema")
+        except jsonschema.exceptions.ValidationError as e:
+            raise AssertionError(f"Partial schema validation failed at path {path!r} (ignored keys: {ignore_keys}): {e.message}")
+            
         return self
 
     def extract_json(self, path: str, key: str) -> ApiResponse:
@@ -156,11 +200,33 @@ class ApiResponse:
         obj = matches[0]
         return list(obj.values())
 
-    def prettify(self) -> ApiResponse:
-        """Print the response JSON in a pretty-formatted style to the terminal and logs."""
-        output = json.dumps(self.json_data, indent=4) if self.json_data is not None else self.text
+    def prettify(self, verbose: bool = True, max_length: int = 2000) -> ApiResponse:
+        """Print the response JSON in a pretty-formatted style to the terminal and logs.
         
-        # 1. Try writing directly to the real terminal (bypasses pytest capture)
+        Args:
+            verbose: If False, only show minimal status (no body) on errors (default: True)
+            max_length: Truncate output longer than this (default: 2000 chars)
+        """
+        # Check if response indicates error (4xx/5xx)
+        is_error = self.status_code >= 400
+        
+        # Get output
+        if self.json_data is not None:
+            output = json.dumps(self.json_data, indent=4)
+        else:
+            output = self.text
+        
+        # Truncate if too long
+        if len(output) > max_length:
+            output = output[:max_length] + f"\n... [truncated {len(output) - max_length} chars]"
+        
+        # For errors, be quiet unless verbose=True
+        if is_error and not verbose:
+            # Just show status code, no body - user will see full error in assert_status
+            print(f"[{self.status_code}] Error")
+            return self
+        
+        # Full output for success or verbose mode
         import sys
         try:
             if sys.__stdout__ and sys.__stdout__.writable():
@@ -171,9 +237,9 @@ class ApiResponse:
         except Exception:
             print(output)
         
-        # 2. Log to logger (visible if log level is INFO/DEBUG)
+        # Also log
         import logging
-        logging.getLogger("pyshaft.api").info(f"Response Body:\n{output}")
+        logging.getLogger("pyshaft.api").info(f"Response [{self.status_code}]:\n{output}")
         
         # 3. Attach to Allure Report if plugin is active
         try:

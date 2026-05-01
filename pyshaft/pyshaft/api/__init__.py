@@ -112,8 +112,22 @@ class ApiEngine:
         self._get_builder().assert_json_in_array(path, criteria)
         return self
 
-    def prettify(self) -> ApiEngine:
-        self._get_builder().prettify()
+    def assert_schema(self, schema: dict, path: str = "$") -> ApiEngine:
+        self._get_builder().assert_schema(schema, path=path)
+        return self
+
+    def assert_partial_schema(self, schema: dict, ignore_keys: list[str], path: str = "$") -> ApiEngine:
+        self._get_builder().assert_partial_schema(schema, ignore_keys, path=path)
+        return self
+
+    def prettify(self, verbose: bool = True, max_length: int = 2000) -> ApiEngine:
+        """Print response in pretty format.
+        
+        Args:
+            verbose: If False, only show status and summary on errors (default: True)
+            max_length: Truncate output longer than this (default: 2000 chars)
+        """
+        self._get_builder().prettify(verbose=verbose, max_length=max_length)
         return self
 
     def extract_json(self, path: str, key: str) -> ApiEngine:
@@ -139,7 +153,10 @@ class ApiEngine:
             self._current_builder.get(url)
             self._current_builder.extra(**kwargs)
             return self
-        return send_get(url, **kwargs)
+        # Auto-create builder for resolution support
+        self._current_builder = RequestBuilder("GET", url)
+        self._current_builder.extra(**kwargs)
+        return self
 
     def post(self, url: str, body: Any = None, **kwargs: Any) -> Any:
         """Send a POST request."""
@@ -148,25 +165,40 @@ class ApiEngine:
             self._current_builder.body(body)
             self._current_builder.extra(**kwargs)
             return self
-        return send_post(url, body, **kwargs)
+        # Auto-create builder for resolution support
+        self._current_builder = RequestBuilder("POST", url)
+        self._current_builder.body(body)
+        self._current_builder.extra(**kwargs)
+        return self
 
     def put(self, url: str, body: Any = None, **kwargs: Any) -> Any:
         if self._current_builder is not None:
             self._current_builder.put(url).body(body).extra(**kwargs)
             return self
-        return send_put(url, body, **kwargs)
+        # Auto-create builder for resolution support
+        self._current_builder = RequestBuilder("PUT", url)
+        self._current_builder.body(body)
+        self._current_builder.extra(**kwargs)
+        return self
 
     def patch(self, url: str, body: Any = None, **kwargs: Any) -> Any:
         if self._current_builder is not None:
             self._current_builder.patch(url).body(body).extra(**kwargs)
             return self
-        return send_patch(url, body, **kwargs)
+        # Auto-create builder for resolution support
+        self._current_builder = RequestBuilder("PATCH", url)
+        self._current_builder.body(body)
+        self._current_builder.extra(**kwargs)
+        return self
 
     def delete(self, url: str, **kwargs: Any) -> Any:
         if self._current_builder is not None:
             self._current_builder.delete(url).extra(**kwargs)
             return self
-        return send_delete(url, **kwargs)
+        # Auto-create builder for resolution support
+        self._current_builder = RequestBuilder("DELETE", url)
+        self._current_builder.extra(**kwargs)
+        return self
 
     # --- Compatibility & Aliases ---
 
@@ -190,7 +222,7 @@ class ApiEngine:
             elif isinstance(obj, list):
                 return [_replace(i) for i in obj]
             elif isinstance(obj, str):
-                match = re.fullmatch(r"\{\{\s*(\w+)\s*\}\}", obj)
+                match = re.fullmatch(r"\{\{\s*([\w-]+)\s*\}\}", obj)
                 if match:
                     key = match.group(1)
                     if key in data: return data[key]

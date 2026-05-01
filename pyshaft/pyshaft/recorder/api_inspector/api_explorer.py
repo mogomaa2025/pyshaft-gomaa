@@ -25,12 +25,66 @@ if TYPE_CHECKING:
     from pyshaft.recorder.api_inspector.api_models import ApiFolder, ApiRequestStep
 
 
+class _ExplorerTree(QTreeWidget):
+    """Custom QTreeWidget that handles drag-and-drop without InternalMove
+    to prevent Qt's automatic source-item removal causing items to vanish."""
+
+    item_moved = pyqtSignal()  # emitted after a successful drag-move
+
+    def dropEvent(self, event) -> None:
+        """Fully manual drop handling — we move the tree item ourselves
+        and tell Qt the action was Copy so it won't delete the source."""
+        if event.source() is not self:
+            event.ignore()
+            return
+
+        selected = self.selectedItems()
+        if not selected:
+            event.ignore()
+            return
+        source_item = selected[0]
+
+        target_item = self.itemAt(event.position().toPoint())
+        indicator = self.dropIndicatorPosition()
+
+        # 1. Remove from old position
+        old_parent = source_item.parent() or self.invisibleRootItem()
+        old_parent.takeChild(old_parent.indexOfChild(source_item))
+
+        # 2. Insert into new position
+        if not target_item:
+            self.invisibleRootItem().addChild(source_item)
+        else:
+            target_data = target_item.data(0, Qt.ItemDataRole.UserRole)
+            if indicator == QTreeWidget.DropIndicatorPosition.OnItem and isinstance(target_data, ApiFolder):
+                target_item.addChild(source_item)
+                target_item.setExpanded(True)
+            elif indicator == QTreeWidget.DropIndicatorPosition.AboveItem:
+                parent = target_item.parent() or self.invisibleRootItem()
+                parent.insertChild(parent.indexOfChild(target_item), source_item)
+            elif indicator == QTreeWidget.DropIndicatorPosition.BelowItem:
+                parent = target_item.parent() or self.invisibleRootItem()
+                parent.insertChild(parent.indexOfChild(target_item) + 1, source_item)
+            else:
+                self.invisibleRootItem().addChild(source_item)
+
+        self.setCurrentItem(source_item)
+
+        # Accept as CopyAction so Qt does NOT remove source items automatically
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+
+        self.item_moved.emit()
+
+
 class ApiExplorerDock(QDockWidget):
     """Explorer dock showing folders and requests."""
 
-    step_selected = pyqtSignal(object)  # ApiRequestStep
-    item_deleted = pyqtSignal(bool) # Signal to refresh other docks, bool = refresh_explorer
+    step_selected = pyqtSignal(object)      # ApiRequestStep
+    context_selected = pyqtSignal(object)   # ApiRequestStep | ApiFolder | ApiWorkflow
+    item_deleted = pyqtSignal(bool)          # bool = refresh_explorer
     item_added = pyqtSignal(object)
+    export_docs_requested = pyqtSignal(object)  # ApiFolder | ApiRequestStep
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Explorer", parent)
@@ -70,22 +124,24 @@ class ApiExplorerDock(QDockWidget):
         
         layout.addLayout(search_layout)
 
-        # Tree
-        self._tree = QTreeWidget()
+        # Tree — use custom subclass instead of plain QTreeWidget
+        self._tree = _ExplorerTree()
         self._tree.setHeaderHidden(True)
         self._tree.setIndentation(12)
         self._tree.setAnimated(True)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._show_context_menu)
         self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self._tree.itemClicked.connect(self._on_item_single_clicked)
         
-        # Enable Drag and Drop
+        # Enable Drag and Drop — use DragDrop mode (NOT InternalMove)
+        # so that Qt does not auto-remove source items behind our back.
         self._tree.setDragEnabled(True)
         self._tree.setAcceptDrops(True)
-        self._tree.setDragDropMode(QTreeWidget.DragDropMode.InternalMove)
+        self._tree.setDragDropMode(QTreeWidget.DragDropMode.DragDrop)
         self._tree.setDropIndicatorShown(True)
         self._tree.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self._tree.dropEvent = self._on_drop_event
+        self._tree.item_moved.connect(self._on_tree_item_moved)
         
         self._tree.setStyleSheet(f"""
             QTreeWidget {{
@@ -106,47 +162,9 @@ class ApiExplorerDock(QDockWidget):
 
         self.setWidget(container)
 
-    def _on_drop_event(self, event) -> None:
-        """Handle internal drag and drop manually to prevent duplication and sync model."""
-        if event.source() != self._tree:
-            return
-
-        selected_items = self._tree.selectedItems()
-        if not selected_items:
-            return
-        source_item = selected_items[0]
-        
-        target_item = self._tree.itemAt(event.position().toPoint())
-        indicator = self._tree.dropIndicatorPosition()
-        
-        # 1. Remove from old position in tree
-        old_parent = source_item.parent() or self._tree.invisibleRootItem()
-        old_parent.takeChild(old_parent.indexOfChild(source_item))
-        
-        # 2. Insert into new position in tree
-        if not target_item:
-            self._tree.invisibleRootItem().addChild(source_item)
-        else:
-            target_data = target_item.data(0, Qt.ItemDataRole.UserRole)
-            if indicator == QTreeWidget.DropIndicatorPosition.OnItem and isinstance(target_data, ApiFolder):
-                target_item.addChild(source_item)
-                target_item.setExpanded(True)
-            elif indicator == QTreeWidget.DropIndicatorPosition.AboveItem:
-                parent = target_item.parent() or self._tree.invisibleRootItem()
-                parent.insertChild(parent.indexOfChild(target_item), source_item)
-            elif indicator == QTreeWidget.DropIndicatorPosition.BelowItem:
-                parent = target_item.parent() or self._tree.invisibleRootItem()
-                parent.insertChild(parent.indexOfChild(target_item) + 1, source_item)
-            else:
-                self._tree.invisibleRootItem().addChild(source_item)
-
-        self._tree.setCurrentItem(source_item)
-        event.accept()
-        
-        # 3. Sync model from tree structure
+    def _on_tree_item_moved(self) -> None:
+        """Called after the custom tree widget completes a drag-move."""
         self._sync_model_from_tree()
-        
-        # 4. Refresh other docks but skip full explorer rebuild (already correct in tree)
         self.item_deleted.emit(False)
 
     def _sync_model_from_tree(self) -> None:
@@ -215,6 +233,12 @@ class ApiExplorerDock(QDockWidget):
         if isinstance(data, ApiRequestStep):
             self.step_selected.emit(data)
 
+    def _on_item_single_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        """Emit context_selected so the code dock can scope its output."""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if data is not None:
+            self.context_selected.emit(data)
+
     def _show_context_menu(self, pos) -> None:
         item = self._tree.itemAt(pos)
         menu = QMenu()
@@ -225,8 +249,12 @@ class ApiExplorerDock(QDockWidget):
                 menu.addAction("➕ Add Request", lambda: self._add_request_to_folder(data))
                 menu.addAction("📁 Add Sub-folder", lambda: self._add_subfolder(data))
                 menu.addAction("✏ Rename", lambda: self._rename_item(item, data))
+                menu.addSeparator()
+                menu.addAction("📄 Generate HTML Docs", lambda: self.export_docs_requested.emit(data))
             else:
                 menu.addAction("✏ Rename", lambda: self._rename_item(item, data))
+                menu.addSeparator()
+                menu.addAction("📄 Generate HTML Docs", lambda: self.export_docs_requested.emit(data))
             
             menu.addSeparator()
             menu.addAction("⬆ Move Up", lambda: self._move_item(item, -1))
@@ -251,9 +279,9 @@ class ApiExplorerDock(QDockWidget):
             parent.insertChild(new_index, item)
             self._tree.setCurrentItem(item)
             
-            # Sync model
+            # Sync model (skip explorer rebuild — tree is already correct)
             self._sync_model_from_tree()
-            self.item_deleted.emit(True)
+            self.item_deleted.emit(False)
 
     def _add_request_to_folder(self, folder: ApiFolder) -> None:
         step = ApiRequestStep(name="New Request")
