@@ -185,10 +185,34 @@ class ApiExplorerDock(QDockWidget):
         self._workflow.items = _collect_items(self._tree.invisibleRootItem())
 
     def set_workflow(self, workflow: ApiWorkflow) -> None:
-        """Populate the tree from the workflow."""
+        """Populate the tree from the workflow, preserving expanded state."""
+        # Save expanded folder paths
+        expanded_paths = set()
+        def collect_expanded(item: QTreeWidgetItem, path: str) -> None:
+            if item.isExpanded():
+                expanded_paths.add(path)
+            for i in range(item.childCount()):
+                child = item.child(i)
+                data = child.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(data, ApiFolder):
+                    collect_expanded(child, f"{path}/{data.name}" if path else data.name)
+        collect_expanded(self._tree.invisibleRootItem(), "")
+        
+        # Rebuild tree
         self._workflow = workflow
         self._tree.clear()
         self._populate_recursive(self._tree.invisibleRootItem(), workflow.items)
+        
+        # Restore expanded state
+        def restore_expanded(item: QTreeWidgetItem, path: str) -> None:
+            if path in expanded_paths:
+                item.setExpanded(True)
+            for i in range(item.childCount()):
+                child = item.child(i)
+                data = child.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(data, ApiFolder):
+                    restore_expanded(child, f"{path}/{data.name}" if path else data.name)
+        restore_expanded(self._tree.invisibleRootItem(), "")
 
     def _populate_recursive(self, parent_item: QTreeWidgetItem, items: list[ApiFolder | ApiRequestStep]) -> None:
         for item in items:

@@ -39,6 +39,8 @@ class AssertionType(StrEnum):
     HEADER_EQUALS = "header_equals"
     RESPONSE_TIME_LT = "response_time_lt"
     JSON_SCHEMA = "json_schema"
+    DEEP_EQUALS = "deep_equals"
+    DEEP_CONTAINS = "deep_contains"
 
 
 class PipelineOp(StrEnum):

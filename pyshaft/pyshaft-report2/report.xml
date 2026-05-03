@@ -1,8 +1,8 @@
 <?xml version='1.0' encoding='utf-8'?>
-<testsuites name="PyShaft Test Suite" tests="1" failures="1" errors="0" skipped="0" time="0.322">
-  <testsuite name="PyShaft Test Suite" tests="1" failures="1" errors="0" skipped="0" time="0.322">
-    <testcase name="test_Delete_importer_exporter" classname="tests/examples/SZ/Harbour/importer-exporter/importer.py::test_Delete_importer_exporter" time="0.322">
-      <failure message="API Status Mismatch&#10;Expected: 200&#10;Actual:   404&#10;Body:     {&quot;message&quot;:&quot;ImporterExporterData not found: 158&quot;,&quot;status&quot;:404,&quot;timestamp&quot;:&quot;2026-05-03 14:05:57&quot;}">Traceback (most recent call last):
+<testsuites name="PyShaft Test Suite" tests="1" failures="1" errors="0" skipped="0" time="0.294">
+  <testsuite name="PyShaft Test Suite" tests="1" failures="1" errors="0" skipped="0" time="0.294">
+    <testcase name="test_Get_All_Importer_Exporter" classname="tests/examples/SZ/Harbour/importer-exporter/importer.py::test_Get_All_Importer_Exporter" time="0.294">
+      <failure message="No matches found for path: '$.data.id'">Traceback (most recent call last):
   File "D:\automation\me\pyshaft\.venv\Lib\site-packages\_pytest\runner.py", line 353, in from_call
     result: TResult | None = func()
                              ~~~~^^
@@ -54,23 +54,21 @@
     res = hook_impl.function(*args)
   File "D:\automation\me\pyshaft\.venv\Lib\site-packages\_pytest\python.py", line 166, in pytest_pyfunc_call
     result = testfunction(**testargs)
-  File "D:\automation\me\pyshaft\tests\examples\SZ\Harbour\importer-exporter\importer.py", line 66, in test_Delete_importer_exporter
-    .assert_status(200)
-     ~~~~~~~~~~~~~^^^^^
-  File "D:\automation\me\pyshaft\pyshaft\api\__init__.py", line 93, in assert_status
-    self._get_builder().assert_status(expected)
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
-  File "D:\automation\me\pyshaft\pyshaft\api\builder.py", line 259, in assert_status
-    self._ensure_performed().assert_status(expected)
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
-  File "D:\automation\me\pyshaft\pyshaft\api\response.py", line 28, in assert_status
-    raise AssertionError(
-    ...&lt;4 lines&gt;...
-    )
-AssertionError: API Status Mismatch
-Expected: 200
-Actual:   404
-Body:     {"message":"ImporterExporterData not found: 158","status":404,"timestamp":"2026-05-03 14:05:57"}
+  File "D:\automation\me\pyshaft\tests\examples\SZ\Harbour\importer-exporter\importer.py", line 56, in test_Get_All_Importer_Exporter
+    .assert_json_contains("$.data.id", importer_exporter_id)
+     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\pyshaft\api\__init__.py", line 108, in assert_json_contains
+    self._get_builder().assert_json_contains(path, expected)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\pyshaft\api\builder.py", line 270, in assert_json_contains
+    self._ensure_performed().assert_json_contains(path, expected)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "D:\automation\me\pyshaft\pyshaft\api\response.py", line 54, in assert_json_contains
+    return self.assert_json_path(path).should_contain(expected)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "D:\automation\me\pyshaft\pyshaft\api\response.py", line 528, in should_contain
+    raise AssertionError(f"No matches found for path: {self._path!r}")
+AssertionError: No matches found for path: '$.data.id'
 </failure>
     </testcase>
   </testsuite>

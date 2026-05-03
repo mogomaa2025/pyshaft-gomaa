@@ -7,6 +7,7 @@ Registered as a pytest plugin via ``pyproject.toml`` entry point:
 
 from __future__ import annotations
 
+from sys import exception
 import logging
 
 import pytest

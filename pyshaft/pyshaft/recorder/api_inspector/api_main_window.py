@@ -293,6 +293,7 @@ class ApiMainWindow(QMainWindow):
 
     def _build_toolbar(self) -> None:
         tb = QToolBar("Main"); tb.setMovable(False); tb.setStyleSheet(f"background: {COLORS['bg_dark']}; padding: 4px;")
+        btn_preview = QPushButton("👁 Preview"); btn_preview.setStyleSheet(f"background: {COLORS['accent_blue']}22; color: {COLORS['accent_blue']}; font-weight: 700; padding: 6px 14px;"); btn_preview.clicked.connect(self._preview_current_request); tb.addWidget(btn_preview)
         btn_send = QPushButton("▶ Send"); btn_send.setStyleSheet(f"background: {COLORS['accent_green']}22; color: {COLORS['accent_green']}; font-weight: 700; padding: 6px 14px;"); btn_send.clicked.connect(self._run_current_tab); tb.addWidget(btn_send)
         tb.addSeparator()
         self._env_combo = QComboBox()
@@ -444,7 +445,18 @@ class ApiMainWindow(QMainWindow):
         t = AssertionType.JSON_PATH_EQUALS
         if mode == "contains": t = AssertionType.JSON_PATH_CONTAINS
         elif mode == "type": t = AssertionType.JSON_PATH_TYPE
-        new_a = ApiAssertion(type=t, path=path, expected=str(val)); self._on_assertion_added(new_a); self._assert_dock.show(); self._assert_dock.raise_()
+        elif mode == "deep_equals": t = AssertionType.DEEP_EQUALS
+        elif mode == "deep_contains": t = AssertionType.DEEP_CONTAINS
+        
+        # For deep equal types, store the expected as JSON string
+        if mode in ("deep_equals", "deep_contains"):
+            import json
+            expected_str = json.dumps(val, indent=2)
+        else:
+            expected_str = str(val)
+        
+        new_a = ApiAssertion(type=t, path=path, expected=expected_str)
+        self._on_assertion_added(new_a); self._assert_dock.show(); self._assert_dock.raise_()
 
     def _on_schema_assertion(self, path: str, schema_json: str) -> None:
         """Create a JSON_SCHEMA assertion from the generated schema."""
@@ -492,12 +504,60 @@ class ApiMainWindow(QMainWindow):
         if isinstance(b, ApiRequestBuilder):
             b.save_to_step(); self._status_label.setText(f"Sending {b.step.name}..."); threading.Thread(target=self._execute_step, args=(b.step,), daemon=True).start()
 
+    def _preview_current_request(self) -> None:
+        """Show a preview dialog with the request details before sending."""
+        b = self._tabs.currentWidget()
+        if not isinstance(b, ApiRequestBuilder):
+            return
+        
+        b.save_to_step()
+        step = b.step
+        
+        # Resolve all variables to show final values
+        url = self._resolve_url(step)
+        headers = self._resolve_headers(step)
+        payload = self._resolve_payload(step)
+        
+        # Build preview text
+        preview_lines = [
+            f"📡 {step.method.value} Request Preview",
+            "=" * 50,
+            f"\n🌐 URL:\n{url}",
+            f"\n📋 Method: {step.method.value}",
+            f"\n📑 Headers:",
+        ]
+        for k, v in headers.items():
+            preview_lines.append(f"    {k}: {v}")
+        
+        preview_lines.append(f"\n📦 Body:")
+        if payload:
+            import json
+            preview_lines.append(json.dumps(payload, indent=2))
+        else:
+            preview_lines.append("    (empty)")
+        
+        preview_lines.append("\n" + "=" * 50)
+        
+        # Show in a message box
+        from PyQt6.QtWidgets import QMessageBox
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Request Preview")
+        msg.setText("\n".join(preview_lines))
+        msg.setMinimumSize(600, 400)
+        msg.exec()
+
     def _execute_step(self, step: ApiRequestStep) -> None:
         start = time.time()
         try:
             url = self._resolve_url(step)
             headers = self._resolve_headers(step)
             payload = self._resolve_payload(step)
+            print(f"[DEBUG] ===== FINAL REQUEST =====")  # DEBUG
+            print(f"[DEBUG] Method: {step.method.value}")  # DEBUG
+            print(f"[DEBUG] URL: {url}")  # DEBUG
+            print(f"[DEBUG] Headers: {headers}")  # DEBUG
+            print(f"[DEBUG] Body (json): {payload}")  # DEBUG
+            print(f"[DEBUG] ========================")  # DEBUG
             m = step.method.value.upper(); kwargs = {"headers": headers, "timeout": 30}
             if m in ("POST", "PUT", "PATCH") and payload: kwargs["json"] = payload
             resp = self._session.request(m, url, **kwargs); dur = (time.time() - start) * 1000
@@ -652,14 +712,22 @@ class ApiMainWindow(QMainWindow):
 
     def _resolve_payload(self, step: ApiRequestStep) -> Any:
         if not step.payload: return None
-        ps = step.payload; active_vars = self._get_active_variables()
+        ps = step.payload
+        print(f"[DEBUG] Raw payload: {ps[:200]}", flush=True)  # DEBUG
+        active_vars = self._get_active_variables()
         for vn, vv in active_vars.items():
             actual = os.environ.get(vv[1:], vv) if isinstance(vv, str) and vv.startswith("$") else vv
             ps = ps.replace(f"{{{{{vn}}}}}", str(actual))
-        # Resolve built-in dynamic variables (e.g. {{$randomInt}})
+        print(f"[DEBUG] After var substitution: {ps[:200]}", flush=True)  # DEBUG
         ps = self._resolve_dynamic_vars(ps)
-        try: return json.loads(ps)
-        except: return ps
+        print(f"[DEBUG] After dynamic vars: {ps[:200]}", flush=True)  # DEBUG
+        try: 
+            result = json.loads(ps)
+            print(f"[DEBUG] JSON parsed successfully: {result}", flush=True)  # DEBUG
+            return result
+        except Exception as e:
+            print(f"[DEBUG] JSON parse failed: {e}, returning raw string", flush=True)  # DEBUG
+            return ps
 
     def _open_workflow(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open", "", "JSON (*.json)")

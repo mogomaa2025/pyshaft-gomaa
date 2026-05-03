@@ -116,18 +116,38 @@ class ApiEngine:
         self._get_builder().assert_schema(schema, path=path)
         return self
 
+    def assert_deep_equals(self, path: str, expected: Any) -> ApiEngine:
+        """Assert that a JSON object at path deeply equals the expected object."""
+        self._get_builder().assert_deep_equals(path, expected)
+        return self
+
+    def assert_deep_contains(self, path: str, expected: dict) -> ApiEngine:
+        """Assert that a JSON object at path contains all key-value pairs from expected."""
+        self._get_builder().assert_deep_contains(path, expected)
+        return self
+
     def assert_partial_schema(self, schema: dict, ignore_keys: list[str], path: str = "$") -> ApiEngine:
         self._get_builder().assert_partial_schema(schema, ignore_keys, path=path)
         return self
 
-    def prettify(self, verbose: bool = True, max_length: int = 2000) -> ApiEngine:
-        """Print response in pretty format.
+    def log(self, verbose: bool = True, max_length: int = 2000) -> ApiEngine:
+        """Log/print the response in pretty format.
         
         Args:
-            verbose: If False, only show status and summary on errors (default: True)
+            verbose: If True, show full response. If False, show minimal output (default: True)
             max_length: Truncate output longer than this (default: 2000 chars)
         """
-        self._get_builder().prettify(verbose=verbose, max_length=max_length)
+        self._get_builder().log(verbose=verbose, max_length=max_length)
+        return self
+
+    def prettify(self, verbose: bool = True, max_length: int = 2000) -> ApiEngine:
+        """Alias for log(). Print response in pretty format.
+        
+        Args:
+            verbose: If True, show full response. If False, show minimal output (default: True)
+            max_length: Truncate output longer than this (default: 2000 chars)
+        """
+        self._get_builder().log(verbose=verbose, max_length=max_length)
         return self
 
     def extract_json(self, path: str, key: str) -> ApiEngine:

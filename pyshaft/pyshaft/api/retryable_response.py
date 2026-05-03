@@ -153,10 +153,16 @@ class RetryableResponse:
     def for_each_key(self, path: str, callback: Any) -> "RetryableResponse":
         """Execute a callback function for each key in a JSON object at path."""
         self._response.for_each_key(path, callback)
+return self
+
+def log(self, verbose: bool = True, max_length: int = 2000) -> "RetryableResponse":
+        """Log/print the response in pretty format."""
+        self._response.log(verbose=verbose, max_length=max_length)
         return self
 
 def prettify(self, verbose: bool = True, max_length: int = 2000) -> "RetryableResponse":
-        self._response.prettify(verbose=verbose, max_length=max_length)
+        """Alias for log()."""
+        self._response.log(verbose=verbose, max_length=max_length)
         return self
 
     def assert_json_path(self, path: str, expected: Any = None) -> Any:

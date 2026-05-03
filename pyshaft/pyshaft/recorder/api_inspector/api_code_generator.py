@@ -406,6 +406,21 @@ def _chain(step: ApiRequestStep, base_url: str = "", indent: str = "", is_pom: b
                     lines.append(f'{indent}.assert_schema({schema}, path="{path}")')
             except Exception:
                 lines.append(f"{indent}.assert_schema({a.expected})")
+        elif a.type == AssertionType.DEEP_EQUALS:
+            # Parse the JSON string to pretty-print it
+            try:
+                expected_obj = json.loads(a.expected)
+                expected_str = json.dumps(expected_obj, indent=4).replace("\n", "\n" + indent + "    ")
+                lines.append(f'{indent}.assert_deep_equals("{path}", {expected_str})')
+            except Exception:
+                lines.append(f'{indent}.assert_deep_equals("{path}", {a.expected})')
+        elif a.type == AssertionType.DEEP_CONTAINS:
+            try:
+                expected_obj = json.loads(a.expected)
+                expected_str = json.dumps(expected_obj, indent=4).replace("\n", "\n" + indent + "    ")
+                lines.append(f'{indent}.assert_deep_contains("{path}", {expected_str})')
+            except Exception:
+                lines.append(f'{indent}.assert_deep_contains("{path}", {a.expected})')
 
     # Extractions
     for e in step.extractions:

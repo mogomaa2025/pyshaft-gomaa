@@ -74,6 +74,54 @@ class ApiResponse:
             raise AssertionError(f"No object in {path!r} matches criteria {criteria!r}")
         return self
 
+    def assert_deep_equals(self, path: str, expected: Any) -> ApiResponse:
+        """Assert that a JSON object at path deeply equals the expected object.
+        
+        Usage: api.get("/users").assert_deep_equals("data", {"id": 1, "name": "Alice"})
+        """
+        actual = self._get_by_path(path)
+        if not self._deep_equal(actual, expected):
+            raise AssertionError(
+                f"Deep equality check failed at {path!r}\n"
+                f"Expected: {expected!r}\n"
+                f"Actual:   {actual!r}"
+            )
+        return self
+
+    def assert_deep_contains(self, path: str, expected: dict) -> ApiResponse:
+        """Assert that a JSON object at path contains all key-value pairs from expected.
+        
+        Usage: api.get("/users").assert_deep_contains("data", {"name": "Alice"})
+        """
+        actual = self._get_by_path(path)
+        if not isinstance(actual, dict):
+            raise TypeError(f"Path {path!r} is not an object (got {type(actual).__name__})")
+        
+        for key, value in expected.items():
+            if key not in actual:
+                raise AssertionError(f"Key {key!r} not found in {path!r}")
+            if not self._deep_equal(actual[key], value):
+                raise AssertionError(
+                    f"Deep contains check failed at {path}.{key}\n"
+                    f"Expected: {value!r}\n"
+                    f"Actual:   {actual[key]!r}"
+                )
+        return self
+
+    def _deep_equal(self, actual: Any, expected: Any) -> bool:
+        """Recursively compare two values for deep equality."""
+        if type(actual) != type(expected):
+            return False
+        if isinstance(actual, dict):
+            if set(actual.keys()) != set(expected.keys()):
+                return False
+            return all(self._deep_equal(actual[k], expected[k]) for k in expected)
+        if isinstance(actual, list):
+            if len(actual) != len(expected):
+                return False
+            return all(self._deep_equal(a, e) for a, e in zip(actual, expected))
+        return actual == expected
+
     def assert_schema(self, schema: dict, path: str = "$") -> ApiResponse:
         """Assert that a JSON value at path matches a JSON Schema."""
         try:
@@ -200,19 +248,32 @@ class ApiResponse:
         obj = matches[0]
         return list(obj.values())
 
-    def prettify(self, verbose: bool = True, max_length: int = 2000) -> ApiResponse:
-        """Print the response JSON in a pretty-formatted style to the terminal and logs.
+    def log(self, verbose: bool = True, max_length: int = 2000) -> ApiResponse:
+        """Log/print the response JSON in pretty format.
         
         Args:
-            verbose: If False, only show minimal status (no body) on errors (default: True)
+            verbose: If True, show full response (status + body). If False, show minimal output (default: True)
             max_length: Truncate output longer than this (default: 2000 chars)
         """
+        return self._log_impl(verbose, max_length)
+    
+    def prettify(self, verbose: bool = True, max_length: int = 2000) -> ApiResponse:
+        """Alias for log(). Print the response JSON in a pretty-formatted style.
+        
+        Args:
+            verbose: If True, show full response. If False, show minimal output (default: True)
+            max_length: Truncate output longer than this (default: 2000 chars)
+        """
+        return self._log_impl(verbose, max_length)
+    
+    def _log_impl(self, verbose: bool = True, max_length: int = 2000) -> ApiResponse:
+        """Internal implementation for logging."""
         # Check if response indicates error (4xx/5xx)
         is_error = self.status_code >= 400
         
         # Get output
         if self.json_data is not None:
-            output = json.dumps(self.json_data, indent=4)
+            output = json.dumps(self.json_data, indent=4, ensure_ascii=False)
         else:
             output = self.text
         
@@ -354,21 +415,37 @@ class ApiResponse:
         return None
 
     def _get_by_path(self, path: str) -> Any:
-        """Internal helper to traverse JSON by dot/bracket notation."""
+        """Internal helper to traverse JSON by dot/bracket notation.
+        
+        Supports:
+        - data.id          → dict key
+        - data[0].id       → array index
+        - data[last].id    → last element in array
+        """
         if self.json_data is None:
             raise ValueError("Response does not contain valid JSON")
         
         import re
         # Strip $ prefix if present (JSONPath style)
         path = path.lstrip("$")
+        
+        # Handle [last] specially - replace with index marker
+        path = path.replace("[last]", "[LAST_INDEX]")
+        
         # Convert brackets to dots: login[0].id -> login.0.id
-        normalized = re.sub(r"\[(\d+)\]", r".\1", path)
+        # Also handles [LAST_INDEX] -> .LAST_INDEX
+        normalized = re.sub(r"\[(\w+)\]", r".\1", path)
         parts = normalized.split(".")
         
         current = self.json_data
         for part in parts:
             if part == "": continue
-            if isinstance(current, dict):
+            if part == "LAST_INDEX":
+                if isinstance(current, list) and len(current) > 0:
+                    current = current[-1]  # Get last element
+                else:
+                    return None
+            elif isinstance(current, dict):
                 current = current.get(part)
             elif isinstance(current, list) and part.isdigit():
                 current = current[int(part)]

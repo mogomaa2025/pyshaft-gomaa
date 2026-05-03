@@ -282,18 +282,38 @@ class RequestBuilder:
         self._ensure_performed().assert_schema(schema, path=path)
         return self
 
+    def assert_deep_equals(self, path: str, expected: Any) -> RequestBuilder:
+        """Assert that a JSON object at path deeply equals the expected object."""
+        self._ensure_performed().assert_deep_equals(path, expected)
+        return self
+
+    def assert_deep_contains(self, path: str, expected: dict) -> RequestBuilder:
+        """Assert that a JSON object at path contains all key-value pairs from expected."""
+        self._ensure_performed().assert_deep_contains(path, expected)
+        return self
+
     def assert_partial_schema(self, schema: dict, ignore_keys: list[str], path: str = "$") -> RequestBuilder:
         self._ensure_performed().assert_partial_schema(schema, ignore_keys, path=path)
         return self
 
-    def prettify(self, verbose: bool = True, max_length: int = 2000) -> RequestBuilder:
-        """Execute and print the pretty response body.
+    def log(self, verbose: bool = True, max_length: int = 2000) -> RequestBuilder:
+        """Log/print the response JSON in pretty format.
         
         Args:
-            verbose: If False, only show status and summary (default: True)
+            verbose: If True, show full response. If False, show minimal output (default: True)
             max_length: Truncate output longer than this (default: 2000 chars)
         """
-        self._ensure_performed().prettify(verbose=verbose, max_length=max_length)
+        self._ensure_performed().log(verbose=verbose, max_length=max_length)
+        return self
+
+    def prettify(self, verbose: bool = True, max_length: int = 2000) -> RequestBuilder:
+        """Alias for log(). Execute and print the pretty response body.
+        
+        Args:
+            verbose: If True, show full response. If False, show minimal output (default: True)
+            max_length: Truncate output longer than this (default: 2000 chars)
+        """
+        self._ensure_performed().log(verbose=verbose, max_length=max_length)
         return self
 
     def extract_json(self, path: str, key: str) -> RequestBuilder:

@@ -37,6 +37,9 @@ class StepNode(QGraphicsRectItem):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setBrush(QBrush(QColor(COLORS['bg_card'])))
         self.setPen(QPen(QColor(COLORS['border']), 1))
+        
+        # Track connected arrows to update them when moved
+        self._connected_arrows: list = []
 
         # Method badge
         method = step.method.value
@@ -53,6 +56,17 @@ class StepNode(QGraphicsRectItem):
         
         # IO Labels
         self._build_io_labels()
+    
+    def register_arrow(self, arrow) -> None:
+        """Register an arrow that connects to this node."""
+        self._connected_arrows.append(arrow)
+    
+    def mouseMoveEvent(self, event) -> None:
+        """Override to update arrows when node is moved."""
+        super().mouseMoveEvent(event)
+        # Update all connected arrows
+        for arrow in self._connected_arrows:
+            arrow._update_path()
 
     def _build_io_labels(self) -> None:
         # Inputs (Left side)
@@ -93,7 +107,22 @@ class StepNode(QGraphicsRectItem):
             label.setPos(5, y)
 
     def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Store click position to detect drag vs click
+            self._click_pos = event.scenePos()
         super().mousePressEvent(event)
+    
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
+        # Only emit step_selected if it was a click (not a drag)
+        if hasattr(self, '_click_pos'):
+            delta = (event.scenePos() - self._click_pos).manhattanLength()
+            if delta < 5:  # It was a click, not a drag
+                self.dock.step_selected.emit(self.step)
+            del self._click_pos
+    
+    def mouseDoubleClickEvent(self, event) -> None:
+        """Double-click always goes to code."""
         self.dock.step_selected.emit(self.step)
 
     def paint(self, painter: QPainter, option, widget) -> None:
@@ -113,18 +142,78 @@ class DependencyArrow(QGraphicsPathItem):
         self.end_item = end_item
         self.var_name = var_name
         self.setPen(QPen(QColor(COLORS['accent_purple']), 2, Qt.PenStyle.DashLine))
+        # Register with both nodes so they can update us when moved
+        start_item.register_arrow(self)
+        end_item.register_arrow(self)
         self._update_path()
 
     def _update_path(self) -> None:
-        start_pos = self.start_item.scenePos() + QPointF(200, 45)
-        end_pos = self.end_item.scenePos() + QPointF(0, 45)
+        # Box dimensions
+        W, H = 200, 90
         
+        # Get center positions in scene coordinates
+        start_center = self.start_item.scenePos() + QPointF(W/2, H/2)
+        end_center = self.end_item.scenePos() + QPointF(W/2, H/2)
+        
+        # Calculate tangent points on box edges
+        if end_center.x() > start_center.x() + W:
+            # End is to the right - connect from right edge to left edge
+            start_tangent = self.start_item.scenePos() + QPointF(W, H/2)
+            end_tangent = self.end_item.scenePos() + QPointF(0, H/2)
+        elif end_center.y() > start_center.y() + H:
+            # End is below - connect from bottom edge to top edge
+            start_tangent = self.start_item.scenePos() + QPointF(W/2, H)
+            end_tangent = self.end_item.scenePos() + QPointF(W/2, 0)
+        elif end_center.y() < start_center.y():
+            # End is above - connect from top edge to bottom edge
+            start_tangent = self.start_item.scenePos() + QPointF(W/2, 0)
+            end_tangent = self.end_item.scenePos() + QPointF(W/2, H)
+        else:
+            # Fallback - use edge points with some offset
+            start_tangent = self.start_item.scenePos() + QPointF(W, H/2)
+            end_tangent = self.end_item.scenePos() + QPointF(0, H/2)
+        
+        # Create curved path that doesn't intersect boxes
         path = QPainterPath()
-        path.moveTo(start_pos)
-        cp1 = QPointF(start_pos.x() + 80, start_pos.y())
-        cp2 = QPointF(end_pos.x() - 80, end_pos.y())
-        path.cubicTo(cp1, cp2, end_pos)
+        path.moveTo(start_tangent)
+        
+        # Control points for smooth curve that stays outside boxes
+        dx = abs(end_tangent.x() - start_tangent.x())
+        dy = abs(end_tangent.y() - start_tangent.y())
+        ctrl_offset = max(60, min(dx/2, dy/2))
+        
+        cp1 = QPointF(start_tangent.x() + ctrl_offset, start_tangent.y())
+        cp2 = QPointF(end_tangent.x() - ctrl_offset, end_tangent.y())
+        
+        path.cubicTo(cp1, cp2, end_tangent)
+        
+        # Add arrowhead at end
+        arrow_size = 8
+        arrow_path = QPainterPath()
+        arrow_path.moveTo(end_tangent)
+        arrow_path.lineTo(end_tangent.x() - arrow_size, end_tangent.y() - arrow_size/2)
+        arrow_path.lineTo(end_tangent.x() - arrow_size, end_tangent.y() + arrow_size/2)
+        arrow_path.closeSubpath()
+        
+        # Combine path with arrowhead
         self.setPath(path)
+        
+        # Store arrowhead for painting
+        self._arrowhead = arrow_path
+
+    def paint(self, painter: QPainter, option, widget) -> None:
+        """Paint the arrow line and arrowhead."""
+        # Draw the main path
+        if not self.path().isEmpty():
+            painter.setPen(self.pen())
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(self.path())
+        
+        # Draw arrowhead
+        if hasattr(self, '_arrowhead') and not self._arrowhead.isEmpty():
+            painter.setPen(QPen(self.pen().color(), 1))
+            painter.setBrush(QBrush(self.pen().color()))
+            painter.drawPath(self._arrowhead)
 
 
 class ApiDiagramDock(QDockWidget):

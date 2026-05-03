@@ -397,6 +397,13 @@ class ApiJsonViewer(QWidget):
             menu.addAction("🎯 Assert Exact", lambda: self._emit_assertion(path, "equals", value))
             menu.addAction("📝 Assert Contains", lambda: self._emit_assertion(path, "contains", value))
             
+            # Deep equal options for objects
+            if isinstance(value, dict):
+                menu.addSeparator()
+                menu.addAction("🔀 Assert Deep Equal", lambda: self._emit_assertion(path, "deep_equals", value))
+                menu.addAction("🔀 Assert Deep Contains", lambda: self._emit_assertion(path, "deep_contains", value))
+                menu.addSeparator()
+            
             # Detect type name including semantic ones
             v_type = item.text(2) # Use the text we set in _set_value_display
             menu.addAction(f"🔢 Assert Type ({v_type})", lambda: self._emit_assertion(path, "type", v_type))
@@ -409,9 +416,11 @@ class ApiJsonViewer(QWidget):
             menu.addAction("📦 Extract", lambda: self.extraction_requested.emit(path, value))
             
             if "[" in path and "]" in path:
-                # Allow extracting the last item specifically
-                last_path = re.sub(r"\[\d+\]$", "[last]", path)
+                # Replace last array index [N] with [last] - handles paths like data[0].name or data.items[2].id
+                # Match [...] that is followed by either end of string or another key (like .name or /key)
+                last_path = re.sub(r"\[(\d+)\](?=\.|$)", "[last]", path)
                 menu.addAction("📦 Extract LAST", lambda: self.extraction_requested.emit(last_path, value))
+                menu.addAction("🎯 Assert LAST", lambda: self._emit_assertion(last_path, "equals", value))
 
             menu.addAction("🗑 Remove Value", lambda: self._delete_node(item))
 
