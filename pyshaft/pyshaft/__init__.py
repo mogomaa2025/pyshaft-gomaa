@@ -18,7 +18,7 @@ from pyshaft.web import (
 )
 from pyshaft.utils import data_from_csv, data_from_json, data_from, retry, retry_on_exception, tag as test_tag
 from pyshaft.testdata import TestDataManager, load_test_data, load_csv, load_json
-from pyshaft.data_pipeline import pipeline, store_value, get_value
+from pyshaft.data_pipeline import pipeline, store_value, get_value, extract
 from pyshaft.data_decorators import data, data_from, parametrize
 
 __all__ = [
@@ -50,6 +50,7 @@ __all__ = [
     "pipeline",
     "store_value",
     "get_value",
+    "extract",
     # Data Decorators (NEW!)
     "data",
     "parametrize",

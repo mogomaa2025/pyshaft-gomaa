@@ -107,13 +107,31 @@ pipeline = DataPipeline()
 
 
 def store_value(key: str, value: Any) -> None:
-    """Store a value in the data pipeline."""
+    """Store a value in both memory and file (for cross-test sharing)."""
     pipeline.set(key, value)
+    # Also save to file for persistence across pytest sessions
+    from pyshaft.api.store import store_data
+    store_data(key, value)
 
 
 def get_value(key: str, default: Any = None) -> Any:
-    """Get a stored value."""
-    return pipeline.get(key, default)
+    """Get a stored value from memory or file.
+    
+    Checks:
+    1. In-memory pipeline (set via store_value())
+    2. File store (set via api.extract_json())
+    """
+    # First check memory
+    val = pipeline.get(key)
+    if val is not None:
+        return val
+    
+    # Fall back to file store
+    from pyshaft.api.store import get_stored
+    try:
+        return get_stored(key)
+    except KeyError:
+        return default
 
 
 def chain_test(key: str, json_path: str):

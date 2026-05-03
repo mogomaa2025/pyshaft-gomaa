@@ -359,6 +359,8 @@ class ApiResponse:
             raise ValueError("Response does not contain valid JSON")
         
         import re
+        # Strip $ prefix if present (JSONPath style)
+        path = path.lstrip("$")
         # Convert brackets to dots: login[0].id -> login.0.id
         normalized = re.sub(r"\[(\d+)\]", r".\1", path)
         parts = normalized.split(".")
