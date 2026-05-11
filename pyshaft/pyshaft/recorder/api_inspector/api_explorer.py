@@ -85,6 +85,8 @@ class ApiExplorerDock(QDockWidget):
     item_deleted = pyqtSignal(bool)          # bool = refresh_explorer
     item_added = pyqtSignal(object)
     export_docs_requested = pyqtSignal(object)  # ApiFolder | ApiRequestStep
+    run_folder_requested = pyqtSignal(object)  # ApiFolder
+    run_request_requested = pyqtSignal(object)  # ApiRequestStep
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Explorer", parent)
@@ -185,34 +187,10 @@ class ApiExplorerDock(QDockWidget):
         self._workflow.items = _collect_items(self._tree.invisibleRootItem())
 
     def set_workflow(self, workflow: ApiWorkflow) -> None:
-        """Populate the tree from the workflow, preserving expanded state."""
-        # Save expanded folder paths
-        expanded_paths = set()
-        def collect_expanded(item: QTreeWidgetItem, path: str) -> None:
-            if item.isExpanded():
-                expanded_paths.add(path)
-            for i in range(item.childCount()):
-                child = item.child(i)
-                data = child.data(0, Qt.ItemDataRole.UserRole)
-                if isinstance(data, ApiFolder):
-                    collect_expanded(child, f"{path}/{data.name}" if path else data.name)
-        collect_expanded(self._tree.invisibleRootItem(), "")
-        
-        # Rebuild tree
+        """Populate the tree from the workflow."""
         self._workflow = workflow
         self._tree.clear()
         self._populate_recursive(self._tree.invisibleRootItem(), workflow.items)
-        
-        # Restore expanded state
-        def restore_expanded(item: QTreeWidgetItem, path: str) -> None:
-            if path in expanded_paths:
-                item.setExpanded(True)
-            for i in range(item.childCount()):
-                child = item.child(i)
-                data = child.data(0, Qt.ItemDataRole.UserRole)
-                if isinstance(data, ApiFolder):
-                    restore_expanded(child, f"{path}/{data.name}" if path else data.name)
-        restore_expanded(self._tree.invisibleRootItem(), "")
 
     def _populate_recursive(self, parent_item: QTreeWidgetItem, items: list[ApiFolder | ApiRequestStep]) -> None:
         for item in items:
@@ -270,12 +248,17 @@ class ApiExplorerDock(QDockWidget):
         if item:
             data = item.data(0, Qt.ItemDataRole.UserRole)
             if isinstance(data, ApiFolder):
+                menu.addAction("▶▶ Run Folder", lambda: self.run_folder_requested.emit(data))
+                menu.addSeparator()
                 menu.addAction("➕ Add Request", lambda: self._add_request_to_folder(data))
                 menu.addAction("📁 Add Sub-folder", lambda: self._add_subfolder(data))
                 menu.addAction("✏ Rename", lambda: self._rename_item(item, data))
                 menu.addSeparator()
                 menu.addAction("📄 Generate HTML Docs", lambda: self.export_docs_requested.emit(data))
-            else:
+            elif isinstance(data, ApiRequestStep):
+                menu.addAction("▶ Run Request", lambda: self.run_request_requested.emit(data))
+                menu.addSeparator()
+                menu.addAction("📋 Duplicate", lambda: self._duplicate_request(item, data))
                 menu.addAction("✏ Rename", lambda: self._rename_item(item, data))
                 menu.addSeparator()
                 menu.addAction("📄 Generate HTML Docs", lambda: self.export_docs_requested.emit(data))
@@ -351,3 +334,26 @@ class ApiExplorerDock(QDockWidget):
             self._workflow.items.remove(data)
             
         self.item_deleted.emit(True)
+
+    def _duplicate_request(self, tree_item: QTreeWidgetItem, data: ApiRequestStep) -> None:
+        """Deep copy a request and insert it below the original."""
+        import copy
+        clone = copy.deepcopy(data)
+        clone.name = f"{data.name} (copy)"
+        clone.last_status = None
+        clone.last_response = None
+        clone.last_duration_ms = 0.0
+        clone.last_error = None
+
+        parent_item = tree_item.parent() or self._tree.invisibleRootItem()
+        parent_data = parent_item.data(0, Qt.ItemDataRole.UserRole)
+
+        if parent_data and isinstance(parent_data, ApiFolder):
+            idx = parent_data.items.index(data)
+            parent_data.items.insert(idx + 1, clone)
+        elif self._workflow:
+            idx = self._workflow.items.index(data)
+            self._workflow.items.insert(idx + 1, clone)
+
+        self.item_deleted.emit(True)  # triggers refresh
+        self.step_selected.emit(clone)

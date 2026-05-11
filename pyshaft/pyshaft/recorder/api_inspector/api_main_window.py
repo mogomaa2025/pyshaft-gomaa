@@ -24,7 +24,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, pyqtSlot, QTimer
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
@@ -42,6 +42,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QWidget,
     QPushButton,
+    QProgressBar,
 )
 
 from pyshaft.recorder.api_inspector.api_assertion_panel import (
@@ -50,6 +51,8 @@ from pyshaft.recorder.api_inspector.api_assertion_panel import (
     ApiPipelineForm,
 )
 from pyshaft.recorder.api_inspector.api_code_dock import ApiCodeDock
+from pyshaft.recorder.shared.console_dock import PyShaftConsole
+from pyshaft.recorder.shared.code_runner import CodeRunner
 from pyshaft.recorder.api_inspector.api_diagram import ApiDiagramDock
 from pyshaft.recorder.api_inspector.api_explorer import ApiExplorerDock
 from pyshaft.recorder.api_inspector.api_history import ApiHistoryDock
@@ -240,6 +243,8 @@ class ApiMainWindow(QMainWindow):
         self._explorer_dock.context_selected.connect(self._on_context_selected)
         self._explorer_dock.item_deleted.connect(self._on_item_deleted_refresh)
         self._explorer_dock.export_docs_requested.connect(self._export_html_docs)
+        self._explorer_dock.run_folder_requested.connect(self.run_folder)
+        self._explorer_dock.run_request_requested.connect(self._run_single_request)
         self._add_dock(self._explorer_dock, Qt.DockWidgetArea.LeftDockWidgetArea, "Explorer")
         
         # 2. Assertions, Extractions, Pipeline (Right Side)
@@ -252,14 +257,23 @@ class ApiMainWindow(QMainWindow):
         self._variable_manager = ApiVariableManager(self); self._variable_manager.variables_changed.connect(self._on_builder_changed)
         self._main_tabs.addTab(self._variable_manager, "📊 Variables")
         
-        self._diagram_dock_widget = ApiDiagramDock(self); self._diagram_dock_widget.step_selected.connect(self._open_step_in_tab)
+        self._diagram_dock_widget = ApiDiagramDock(self)
+        self._diagram_dock_widget.step_selected.connect(self._open_step_in_tab)
+        self._diagram_dock_widget.run_node_requested.connect(self._run_single_request)
+        self._diagram_dock_widget.run_from_here_requested.connect(self._run_from_step)
+        self._diagram_dock_widget.run_flow_requested.connect(self.run_collection)
         self._main_tabs.addTab(self._diagram_dock_widget, "🗺 Workflow Map")
         
         self._code_dock_widget = ApiCodeDock(self); self._code_dock_widget.code_modified.connect(self._on_manual_code_edit)
+        self._code_dock_widget.run_selected_requested.connect(self._run_code_directly)
+        self._code_dock_widget.run_as_test_requested.connect(self._run_code_as_test)
         self._main_tabs.addTab(self._code_dock_widget, "🐍 PyShaft Code")
         
         self._history_dock_widget = ApiHistoryDock(self); self._history_dock_widget.request_restored.connect(self._open_step_in_tab)
         self._main_tabs.addTab(self._history_dock_widget, "🕒 History")
+
+        self._console_dock = PyShaftConsole(self)
+        self._main_tabs.addTab(self._console_dock, "🖥 Console")
 
         # Hide docks by default (except Explorer)
         for dock in self._docks:
@@ -293,7 +307,6 @@ class ApiMainWindow(QMainWindow):
 
     def _build_toolbar(self) -> None:
         tb = QToolBar("Main"); tb.setMovable(False); tb.setStyleSheet(f"background: {COLORS['bg_dark']}; padding: 4px;")
-        btn_preview = QPushButton("👁 Preview"); btn_preview.setStyleSheet(f"background: {COLORS['accent_blue']}22; color: {COLORS['accent_blue']}; font-weight: 700; padding: 6px 14px;"); btn_preview.clicked.connect(self._preview_current_request); tb.addWidget(btn_preview)
         btn_send = QPushButton("▶ Send"); btn_send.setStyleSheet(f"background: {COLORS['accent_green']}22; color: {COLORS['accent_green']}; font-weight: 700; padding: 6px 14px;"); btn_send.clicked.connect(self._run_current_tab); tb.addWidget(btn_send)
         tb.addSeparator()
         self._env_combo = QComboBox()
@@ -319,15 +332,47 @@ class ApiMainWindow(QMainWindow):
         
         tb.addSeparator()
         self._mode_combo = QComboBox()
-        self._mode_combo.addItems(["🛠 Builder", "📊 Variables", "🗺 Workflow Map", "🐍 PyShaft Code", "🕒 History"])
+        self._mode_combo.addItems(["🛠 Builder", "📊 Variables", "🗺 Workflow Map", "🐍 PyShaft Code", "🕒 History", "🖥 Console"])
         self._mode_combo.currentIndexChanged.connect(self._switch_mode)
         tb.addWidget(QLabel(" 🚀 Mode: "))
         tb.addWidget(self._mode_combo)
         
         tb.addSeparator(); btn_export_md = QPushButton("📝 Export MD"); btn_export_md.clicked.connect(self._export_to_markdown); tb.addWidget(btn_export_md)
+        
+        # Run Collection buttons
+        tb.addSeparator()
+        btn_run_collection = QPushButton("▶▶ Run All")
+        btn_run_collection.setStyleSheet(f"background: {COLORS['accent_orange']}33; color: {COLORS['accent_orange']}; font-weight: 700; padding: 6px 14px;")
+        btn_run_collection.setToolTip("Run all requests in collection")
+        btn_run_collection.clicked.connect(self.run_collection)
+        tb.addWidget(btn_run_collection)
+        
+        btn_run_code = QPushButton("🐍 Run Code")
+        btn_run_code.setStyleSheet(f"background: {COLORS['accent_purple']}33; color: {COLORS['accent_purple']}; font-weight: 700; padding: 6px 14px;")
+        btn_run_code.setToolTip("Generate and run as PyShaft test")
+        btn_run_code.clicked.connect(self.run_as_code)
+        tb.addWidget(btn_run_code)
+        
+        tb.addSeparator()
+        btn_import = QPushButton("⬇ Import")
+        btn_import.setToolTip("Import variables from JSON/Postman")
+        btn_import.clicked.connect(self._import_workflow_data)
+        tb.addWidget(btn_import)
+        btn_export = QPushButton("⬆ Export")
+        btn_export.setToolTip("Export variables to JSON")
+        btn_export.clicked.connect(self._export_workflow_data)
+        tb.addWidget(btn_export)
+        
         tb.addSeparator(); btn_add = QPushButton("➕ Request"); btn_add.clicked.connect(self._add_root_request); tb.addWidget(btn_add); self.addToolBar(tb)
 
-    def _build_statusbar(self) -> None: self._status_label = QLabel("Ready"); self.statusBar().addPermanentWidget(self._status_label)
+    def _build_statusbar(self) -> None:
+        self._status_label = QLabel("Ready")
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setMaximumWidth(150)
+        self._progress_bar.setMaximum(0)
+        self._progress_bar.setVisible(False)
+        self.statusBar().addPermanentWidget(self._progress_bar)
+        self.statusBar().addPermanentWidget(self._status_label)
 
     def _setup_shortcuts(self) -> None:
         act_send = QAction(self); act_send.setShortcut(QKeySequence("Ctrl+Return")); act_send.triggered.connect(self._run_current_tab); self.addAction(act_send)
@@ -445,18 +490,7 @@ class ApiMainWindow(QMainWindow):
         t = AssertionType.JSON_PATH_EQUALS
         if mode == "contains": t = AssertionType.JSON_PATH_CONTAINS
         elif mode == "type": t = AssertionType.JSON_PATH_TYPE
-        elif mode == "deep_equals": t = AssertionType.DEEP_EQUALS
-        elif mode == "deep_contains": t = AssertionType.DEEP_CONTAINS
-        
-        # For deep equal types, store the expected as JSON string
-        if mode in ("deep_equals", "deep_contains"):
-            import json
-            expected_str = json.dumps(val, indent=2)
-        else:
-            expected_str = str(val)
-        
-        new_a = ApiAssertion(type=t, path=path, expected=expected_str)
-        self._on_assertion_added(new_a); self._assert_dock.show(); self._assert_dock.raise_()
+        new_a = ApiAssertion(type=t, path=path, expected=str(val)); self._on_assertion_added(new_a); self._assert_dock.show(); self._assert_dock.raise_()
 
     def _on_schema_assertion(self, path: str, schema_json: str) -> None:
         """Create a JSON_SCHEMA assertion from the generated schema."""
@@ -504,60 +538,12 @@ class ApiMainWindow(QMainWindow):
         if isinstance(b, ApiRequestBuilder):
             b.save_to_step(); self._status_label.setText(f"Sending {b.step.name}..."); threading.Thread(target=self._execute_step, args=(b.step,), daemon=True).start()
 
-    def _preview_current_request(self) -> None:
-        """Show a preview dialog with the request details before sending."""
-        b = self._tabs.currentWidget()
-        if not isinstance(b, ApiRequestBuilder):
-            return
-        
-        b.save_to_step()
-        step = b.step
-        
-        # Resolve all variables to show final values
-        url = self._resolve_url(step)
-        headers = self._resolve_headers(step)
-        payload = self._resolve_payload(step)
-        
-        # Build preview text
-        preview_lines = [
-            f"📡 {step.method.value} Request Preview",
-            "=" * 50,
-            f"\n🌐 URL:\n{url}",
-            f"\n📋 Method: {step.method.value}",
-            f"\n📑 Headers:",
-        ]
-        for k, v in headers.items():
-            preview_lines.append(f"    {k}: {v}")
-        
-        preview_lines.append(f"\n📦 Body:")
-        if payload:
-            import json
-            preview_lines.append(json.dumps(payload, indent=2))
-        else:
-            preview_lines.append("    (empty)")
-        
-        preview_lines.append("\n" + "=" * 50)
-        
-        # Show in a message box
-        from PyQt6.QtWidgets import QMessageBox
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Request Preview")
-        msg.setText("\n".join(preview_lines))
-        msg.setMinimumSize(600, 400)
-        msg.exec()
-
     def _execute_step(self, step: ApiRequestStep) -> None:
         start = time.time()
         try:
             url = self._resolve_url(step)
             headers = self._resolve_headers(step)
             payload = self._resolve_payload(step)
-            print(f"[DEBUG] ===== FINAL REQUEST =====")  # DEBUG
-            print(f"[DEBUG] Method: {step.method.value}")  # DEBUG
-            print(f"[DEBUG] URL: {url}")  # DEBUG
-            print(f"[DEBUG] Headers: {headers}")  # DEBUG
-            print(f"[DEBUG] Body (json): {payload}")  # DEBUG
-            print(f"[DEBUG] ========================")  # DEBUG
             m = step.method.value.upper(); kwargs = {"headers": headers, "timeout": 30}
             if m in ("POST", "PUT", "PATCH") and payload: kwargs["json"] = payload
             resp = self._session.request(m, url, **kwargs); dur = (time.time() - start) * 1000
@@ -712,22 +698,14 @@ class ApiMainWindow(QMainWindow):
 
     def _resolve_payload(self, step: ApiRequestStep) -> Any:
         if not step.payload: return None
-        ps = step.payload
-        print(f"[DEBUG] Raw payload: {ps[:200]}", flush=True)  # DEBUG
-        active_vars = self._get_active_variables()
+        ps = step.payload; active_vars = self._get_active_variables()
         for vn, vv in active_vars.items():
             actual = os.environ.get(vv[1:], vv) if isinstance(vv, str) and vv.startswith("$") else vv
             ps = ps.replace(f"{{{{{vn}}}}}", str(actual))
-        print(f"[DEBUG] After var substitution: {ps[:200]}", flush=True)  # DEBUG
+        # Resolve built-in dynamic variables (e.g. {{$randomInt}})
         ps = self._resolve_dynamic_vars(ps)
-        print(f"[DEBUG] After dynamic vars: {ps[:200]}", flush=True)  # DEBUG
-        try: 
-            result = json.loads(ps)
-            print(f"[DEBUG] JSON parsed successfully: {result}", flush=True)  # DEBUG
-            return result
-        except Exception as e:
-            print(f"[DEBUG] JSON parse failed: {e}, returning raw string", flush=True)  # DEBUG
-            return ps
+        try: return json.loads(ps)
+        except: return ps
 
     def _open_workflow(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open", "", "JSON (*.json)")
@@ -947,6 +925,28 @@ class ApiMainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Export MD", f"request-response-{s.name.lower().replace(' ','-')}.md", "Markdown (*.md)")
         if path: Path(path).write_text(md, encoding="utf-8"); self._status_label.setText(f"Exported {Path(path).name}")
 
+    def _export_workflow_data(self) -> None:
+        """Export workflow variables and output to JSON for test chaining."""
+        if not self._workflow: return
+        data = self._workflow.export_as_json()
+        path, _ = QFileDialog.getSaveFileName(self, "Export Workflow Data", f"{self._workflow.name}-data.json", "JSON (*.json)")
+        if path:
+            Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+            self._status_label.setText(f"Exported workflow data to {Path(path).name}")
+
+    def _import_workflow_data(self) -> None:
+        """Import variables from JSON/Postman for test chaining."""
+        if not self._workflow: return
+        path, _ = QFileDialog.getOpenFileName(self, "Import Workflow Data", "", "JSON files (*.json);;All files (*.*)")
+        if path:
+            try:
+                data = json.loads(Path(path).read_text(encoding="utf-8"))
+                self._workflow.import_from_json(data)
+                self._refresh_explorer()
+                self._status_label.setText(f"Imported data from {Path(path).name}")
+            except Exception as e:
+                QMessageBox.warning(self, "Import Failed", f"Could not parse file: {e}")
+
     def _on_tab_changed(self, index: int) -> None:
         if index >= 0:
             builder = self._tabs.widget(index)
@@ -962,4 +962,355 @@ class ApiMainWindow(QMainWindow):
 
     def _load_step_context(self, step: ApiRequestStep) -> None:
         self._response_viewer.set_data(step.last_response); self._assert_form.load_data(step.assertions); self._extract_form.load_data(step.extractions); self._pipe_form.load_data(step.pipeline)
+
+    def _run_single_request(self, step: ApiRequestStep) -> None:
+        """Run a single request from explorer."""
+        self._status_label.setText(f"Sending {step.name}...")
+        threading.Thread(target=self._execute_step, args=(step,), daemon=True).start()
+
+    # ── Run Collection/Folder ─────────────────────────────────────────────
+    def run_collection(self) -> None:
+        """Run all requests in the workflow (collection)."""
+        steps = self._workflow.all_steps
+        if not steps:
+            self._status_label.setText("No requests to run")
+            return
+        self._run_batch(steps, self._workflow.name or "Collection")
+
+    def run_folder(self, folder: ApiFolder) -> None:
+        """Run all requests inside a folder (and its sub-folders)."""
+        steps = self._get_all_steps_from_folder(folder)
+        if not steps:
+            self._status_label.setText(f"No requests in folder '{folder.name}'")
+            return
+        self._run_batch(steps, folder.name)
+
+    def _run_from_step(self, step: ApiRequestStep) -> None:
+        """Run from a specific step onwards (used by Workflow Map 'Run From Here')."""
+        steps = self._diagram_dock_widget.get_steps_from(step)
+        if not steps:
+            self._status_label.setText("No steps to run")
+            return
+        self._run_batch(steps, f"From: {step.name}")
+
+    def _run_batch(self, steps: list[ApiRequestStep], run_name: str) -> None:
+        """Run a list of steps in a background thread with console + report."""
+        self._switch_to_console_tab()
+        self._diagram_dock_widget.clear_all_status()
+        self._console_dock.log_run_start(run_name, len(steps))
+        self._status_label.setText(f"Running {len(steps)} requests...")
+
+        def _worker():
+            from pyshaft.recorder.shared.report_generator import RunReport, StepResult
+            import webbrowser
+            from datetime import datetime
+
+            report = RunReport(name=run_name)
+            report.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Determine active environment name
+            idx = self._workflow.current_environment_index
+            if 0 <= idx < len(self._workflow.environments):
+                report.environment = self._workflow.environments[idx].name
+            report.variables = dict(self._workflow.variables)
+
+            total_start = time.time()
+            passed = 0
+            failed = 0
+
+            for i, step in enumerate(steps):
+                sr = StepResult(
+                    name=step.name,
+                    method=step.method.value.upper(),
+                    expected_status=step.expected_status or 200,
+                    request_body=step.payload or "",
+                )
+                try:
+                    url = self._resolve_url(step)
+                    sr.url = url
+                    headers = self._resolve_headers(step)
+                    sr.request_headers = headers
+                    payload = self._resolve_payload(step)
+
+                    self._execute_step_sync(step)
+
+                    sr.status_code = step.last_status or 0
+                    sr.duration_ms = step.last_duration_ms
+                    sr.url = url
+                    try:
+                        sr.response_body = json.dumps(step.last_response, indent=2) if isinstance(step.last_response, (dict, list)) else str(step.last_response or "")
+                    except Exception:
+                        sr.response_body = str(step.last_response or "")
+
+                    # Check success using the step's own expected_status
+                    expected = step.expected_status or 200
+                    sr.success = sr.status_code == expected
+                    if not sr.success:
+                        sr.error = f"Expected status {expected}, got {sr.status_code}"
+
+                    # Build assertion results
+                    for a in step.assertions:
+                        sr.assertions.append({
+                            "type": a.type.value,
+                            "path": a.path,
+                            "expected": a.expected,
+                            "actual": "",
+                            "passed": sr.success,
+                        })
+                    for e in step.extractions:
+                        sr.extractions.append({
+                            "variable": e.variable_name,
+                            "path": e.json_path,
+                        })
+
+                except Exception as ex:
+                    sr.status_code = 0
+                    sr.duration_ms = step.last_duration_ms
+                    sr.success = False
+                    sr.error = str(ex)
+
+                report.steps.append(sr)
+
+                if sr.success:
+                    passed += 1
+                    detail = f"→ {sr.status_code} ({sr.duration_ms:.0f}ms)"
+                else:
+                    failed += 1
+                    detail = f"→ {sr.status_code} ({sr.duration_ms:.0f}ms) — {sr.error}"
+                self._console_dock.log_step_result(i, step.name, sr.success, detail)
+                # Update diagram node status badge
+                self._diagram_dock_widget.update_node_status(
+                    step.name, sr.status_code, sr.duration_ms, sr.success
+                )
+
+            total_ms = (time.time() - total_start) * 1000
+            report.ended_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Generate HTML report
+            from pyshaft.recorder.shared.report_generator import generate_run_report
+            report_dir = Path.home() / ".pyshaft" / "reports"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_name = "".join(c if c.isalnum() else "_" for c in run_name.lower()).strip("_")
+            report_path = report_dir / f"{safe_name}_{ts}.html"
+            generate_run_report(report, report_path)
+
+            self._console_dock.log_run_finish(passed, failed, total_ms, str(report_path))
+
+            # Emit response for last step to update viewer
+            if steps:
+                last = steps[-1]
+                self._bridge.response_received.emit(
+                    last.last_status or 0, last.last_response, last.last_duration_ms, "", last
+                )
+
+            # Open report in browser
+            try:
+                webbrowser.open(f"file:///{report_path}")
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _get_all_steps_from_folder(self, folder: ApiFolder) -> list[ApiRequestStep]:
+        steps = []
+        for item in folder.items:
+            if isinstance(item, ApiRequestStep):
+                steps.append(item)
+            elif isinstance(item, ApiFolder):
+                steps.extend(self._get_all_steps_from_folder(item))
+        return steps
+
+    def _execute_step_sync(self, step: ApiRequestStep) -> None:
+        """Execute a single step synchronously (for collection running)."""
+        start = time.time()
+        try:
+            url = self._resolve_url(step)
+            headers = self._resolve_headers(step)
+            payload = self._resolve_payload(step)
+            m = step.method.value.upper()
+            kwargs = {"headers": headers, "timeout": 30}
+            if m in ("POST", "PUT", "PATCH") and payload:
+                kwargs["json"] = payload
+            resp = self._session.request(m, url, **kwargs)
+            dur = (time.time() - start) * 1000
+            try:
+                body = resp.json()
+            except:
+                body = resp.text
+            step.last_status = resp.status_code
+            step.last_response = body
+            step.last_duration_ms = dur
+            self._handle_extractions(step, body)
+        except Exception as e:
+            step.last_status = 0
+            step.last_error = str(e)
+            step.last_duration_ms = (time.time() - start) * 1000
+
+    # ── Run as PyShaft Code ─────────────────────────────────────────────────
+    def run_as_code(self) -> None:
+        """Generate Python code and run it as a PyShaft test."""
+        from pyshaft.recorder.api_inspector.api_code_generator import generate_api_code
+        
+        code = generate_api_code(self._workflow, mode="test")
+        
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Generated PyShaft Code")
+        dialog.resize(700, 500)
+        layout = QVBoxLayout(dialog)
+        
+        code_edit = QTextEdit()
+        code_edit.setPlainText(code)
+        code_edit.setReadOnly(True)
+        layout.addWidget(code_edit)
+        
+        btn_layout = QHBoxLayout()
+        run_btn = QPushButton("▶ Run Test")
+        run_btn.clicked.connect(lambda: self._run_generated_code(code, dialog))
+        cancel_btn = QPushButton("Close")
+        cancel_btn.clicked.connect(dialog.close)
+        btn_layout.addWidget(run_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        dialog.exec()
+
+    def _run_generated_code(self, code: str, dialog: QDialog | None = None) -> None:
+        """Execute the generated code as a pytest test with live progress."""
+        import tempfile
+        import subprocess
+        import sys
+        import threading
+        import os
+        from pathlib import Path
+        
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir) / "test_run.py"
+        temp_path.write_text(code, encoding="utf-8")
+        
+        report_dir = Path(temp_dir) / "report"
+        report_dir.mkdir(exist_ok=True)
+        
+        if dialog:
+            dialog.close()
+        
+        self._status_label.setText("🚀 Running tests...")
+        
+        status_widget = QWidget()
+        status_layout = QHBoxLayout(status_widget)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        spinner_label = QLabel("⏳")
+        status_layout.addWidget(spinner_label)
+        self.statusBar().addWidget(status_widget, 1)
+        
+        output_lines = []
+        
+        def run_thread():
+            try:
+                pytest_args = [sys.executable, "-m", "pytest", str(temp_path), 
+                     "-v", "--tb=short", "--quiet"]
+                    
+                try:
+                    subprocess.run([sys.executable, "-m", "pip", "show", "pytest-html"], 
+                                 capture_output=True, timeout=5)
+                    pytest_args.extend([f"--html={report_dir / 'index.html'}",
+                                       f"--self-contained-html"])
+                except:
+                    pass
+                    
+                process = subprocess.Popen(
+                    pytest_args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    universal_newlines=True
+                )
+                
+                while True:
+                    line = process.stdout.readline()
+                    if not line and process.poll() is not None:
+                        break
+                    if line:
+                        output_lines.append(line.rstrip())
+                        status_text = line.strip()[:80]
+                        self._status_label.setText(f"🔄 {status_text}")
+                
+                process.wait()
+                self.statusBar().removeWidget(status_widget)
+                
+                if process.returncode == 0:
+                    self._status_label.setText("✅ All tests passed!")
+                else:
+                    failed = [l for l in output_lines if "FAILED" in l or "ERROR" in l]
+                    self._status_label.setText(f"❌ {len(failed)} test(s) failed")
+                
+                # Open HTML report
+                report_path = report_dir / "index.html"
+                if report_path.exists():
+                    from PyQt6.QtWidgets import QMessageBox
+                    reply = QMessageBox.question(
+                        self, "Tests Complete",
+                        f"Exit code: {process.returncode}\n\nOpen HTML report?",
+                        QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Close,
+                        QMessageBox.StandardButton.Open
+                    )
+                    if reply == QMessageBox.StandardButton.Open:
+                        import webbrowser
+                        webbrowser.open(f"file://{report_path}")
+                else:
+                    # Show console output
+                    from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit
+                    result_dialog = QDialog(self)
+                    result_dialog.setWindowTitle("Test Results")
+                    result_dialog.resize(700, 400)
+                    layout = QVBoxLayout(result_dialog)
+                    output = "\n".join(output_lines[-50:])
+                    text = QTextEdit()
+                    text.setPlainText(output)
+                    text.setReadOnly(True)
+                    layout.addWidget(text)
+                    result_dialog.exec()
+                    
+            except Exception as e:
+                self.statusBar().removeWidget(status_widget)
+                self._status_label.setText(f"❌ Error: {e}")
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "Error", f"Failed to run test: {e}")
+        
+        threading.Thread(target=run_thread, daemon=True).start()
+
+    # ── Run from Code Dock ───────────────────────────────────────────────
+    def _run_code_directly(self, code: str) -> None:
+        """Execute Python code directly in a background thread with console output."""
+        from pyshaft.recorder.shared.code_runner import CodeRunner
+        self._switch_to_console_tab()
+        self._status_label.setText("🚀 Running code...")
+        CodeRunner.run_directly(
+            code,
+            self._console_dock,
+            on_success=lambda: self._status_label.setText("✅ Code executed successfully"),
+            on_error=lambda e: self._status_label.setText(f"❌ Error: {e}")
+        )
+
+    def _run_code_as_test(self, code: str) -> None:
+        """Run generated code as a pytest test with console output."""
+        from pyshaft.recorder.shared.code_runner import CodeRunner
+        self._switch_to_console_tab()
+        self._status_label.setText("🧪 Running test...")
+        CodeRunner.run_as_test(
+            code,
+            self._console_dock,
+            on_success=lambda: self._status_label.setText("✅ Test execution passed"),
+            on_error=lambda e: self._status_label.setText(f"❌ Test failed")
+        )
+
+    def _switch_to_console_tab(self) -> None:
+        """Switch the main tab widget to the Console tab."""
+        for i in range(self._main_tabs.count()):
+            if self._main_tabs.widget(i) is self._console_dock:
+                self._main_tabs.setCurrentIndex(i)
+                return
 

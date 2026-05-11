@@ -96,7 +96,6 @@ class ReportConfig:
     video_on_fail: bool = False
     junit_xml: bool = True
     json_report: bool = True
-    open_on_fail: bool = False  # Open HTML report automatically on test failure
 
 
 @dataclass

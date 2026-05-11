@@ -74,54 +74,6 @@ class ApiResponse:
             raise AssertionError(f"No object in {path!r} matches criteria {criteria!r}")
         return self
 
-    def assert_deep_equals(self, path: str, expected: Any) -> ApiResponse:
-        """Assert that a JSON object at path deeply equals the expected object.
-        
-        Usage: api.get("/users").assert_deep_equals("data", {"id": 1, "name": "Alice"})
-        """
-        actual = self._get_by_path(path)
-        if not self._deep_equal(actual, expected):
-            raise AssertionError(
-                f"Deep equality check failed at {path!r}\n"
-                f"Expected: {expected!r}\n"
-                f"Actual:   {actual!r}"
-            )
-        return self
-
-    def assert_deep_contains(self, path: str, expected: dict) -> ApiResponse:
-        """Assert that a JSON object at path contains all key-value pairs from expected.
-        
-        Usage: api.get("/users").assert_deep_contains("data", {"name": "Alice"})
-        """
-        actual = self._get_by_path(path)
-        if not isinstance(actual, dict):
-            raise TypeError(f"Path {path!r} is not an object (got {type(actual).__name__})")
-        
-        for key, value in expected.items():
-            if key not in actual:
-                raise AssertionError(f"Key {key!r} not found in {path!r}")
-            if not self._deep_equal(actual[key], value):
-                raise AssertionError(
-                    f"Deep contains check failed at {path}.{key}\n"
-                    f"Expected: {value!r}\n"
-                    f"Actual:   {actual[key]!r}"
-                )
-        return self
-
-    def _deep_equal(self, actual: Any, expected: Any) -> bool:
-        """Recursively compare two values for deep equality."""
-        if type(actual) != type(expected):
-            return False
-        if isinstance(actual, dict):
-            if set(actual.keys()) != set(expected.keys()):
-                return False
-            return all(self._deep_equal(actual[k], expected[k]) for k in expected)
-        if isinstance(actual, list):
-            if len(actual) != len(expected):
-                return False
-            return all(self._deep_equal(a, e) for a, e in zip(actual, expected))
-        return actual == expected
-
     def assert_schema(self, schema: dict, path: str = "$") -> ApiResponse:
         """Assert that a JSON value at path matches a JSON Schema."""
         try:
@@ -175,11 +127,47 @@ class ApiResponse:
 
     def extract_json(self, path: str, key: str) -> ApiResponse:
         """Extract a JSON value at path and store it in global memory.
-        Supports 'Simple English' syntax.
+        Supports 'Simple English' syntax and common paths like '0.name', '[first]', '[last]'.
         """
-        val = self.assert_json_path(path)._matches
-        if val:
-            store_data(key, val[0])
+        import logging
+        logger = logging.getLogger("pyshaft.api")
+        import re
+        
+        try:
+            # Handle [first] and [last] special keywords
+            if "[first]" in path:
+                path = path.replace("[first]", "[0]")
+            if "[last]" in path:
+                # Convert [last] to actual last index if we have data
+                if self.json_data and isinstance(self.json_data, list) and len(self.json_data) > 0:
+                    last_idx = len(self.json_data) - 1
+                    path = path.replace("[last]", f"[{last_idx}]")
+            
+            # Normalize path - try multiple formats
+            paths_to_try = [path]
+            
+            # If path starts with digit like "0.name", convert to $[0].name
+            if re.match(r'^\d+\.', path):
+                paths_to_try.append(f"$.[{path}]")
+                paths_to_try.append(f"$[0].{path[2:]}")
+            
+            if not path.startswith("$"):
+                paths_to_try.append(f"$.{path}")
+                paths_to_try.append(f"$[{path}]" if "[" not in path else path)
+                
+            for p in paths_to_try:
+                try:
+                    selector = self.assert_json_path(p)
+                    if selector._matches and len(selector._matches) > 0:
+                        store_data(key, selector._matches[0])
+                        logger.info(f"Extracted '{key}' = {selector._matches[0]} using path '{p}'")
+                        return self
+                except:
+                    continue
+                    
+            logger.warning(f"extract_json: No value found for any path variant of '{path}'")
+        except Exception as e:
+            logger.error(f"extract_json failed for '{path}': {e}")
         return self
 
     def save(self, path: str, key: str) -> ApiResponse:
@@ -218,6 +206,34 @@ class ApiResponse:
                 raise AssertionError(f"Error during for_each_key on key {key!r} of {path!r}: {e}")
         return self
 
+    def find(self, path: str, criteria: dict) -> Any:
+        """Find first item in array at path matching criteria.
+        
+        Usage:
+            item = response.find("data", {"color": "Cloudy White"})
+            if item:
+                print(item["name"])
+        
+        Note: Returns the found item or None. Does NOT continue the chain.
+        To continue chaining, use assert_json_in_array instead.
+        """
+        matches = self.assert_json_path(path)._matches
+        if not matches or not isinstance(matches[0], list):
+            return None
+        
+        items = matches[0]
+        for item in items:
+            if isinstance(item, dict) and all(item.get(k) == v for k, v in criteria.items()):
+                return item
+        return None
+    
+    def find_and_store(self, path: str, criteria: dict, key: str) -> "ApiResponse":
+        """Find item in array, store it, and continue the chain."""
+        found = self.find(path, criteria)
+        if found:
+            store_data(key, found)
+        return self
+
     def map(self, path: str, field: str) -> list[Any]:
         """Extract a specific field from every object in an array at path.
         Supports 'Simple English' syntax.
@@ -248,46 +264,15 @@ class ApiResponse:
         obj = matches[0]
         return list(obj.values())
 
-    def log(self, verbose: bool = True, max_length: int = 2000) -> ApiResponse:
-        """Log/print the response JSON in pretty format.
+    def log(self) -> ApiResponse:
+        """Log request and response details. Alias for prettify()."""
+        return self.prettify()
+
+    def prettify(self) -> ApiResponse:
+        """Print the response JSON in a pretty-formatted style to the terminal and logs."""
+        output = json.dumps(self.json_data, indent=4) if self.json_data is not None else self.text
         
-        Args:
-            verbose: If True, show full response (status + body). If False, show minimal output (default: True)
-            max_length: Truncate output longer than this (default: 2000 chars)
-        """
-        return self._log_impl(verbose, max_length)
-    
-    def prettify(self, verbose: bool = True, max_length: int = 2000) -> ApiResponse:
-        """Alias for log(). Print the response JSON in a pretty-formatted style.
-        
-        Args:
-            verbose: If True, show full response. If False, show minimal output (default: True)
-            max_length: Truncate output longer than this (default: 2000 chars)
-        """
-        return self._log_impl(verbose, max_length)
-    
-    def _log_impl(self, verbose: bool = True, max_length: int = 2000) -> ApiResponse:
-        """Internal implementation for logging."""
-        # Check if response indicates error (4xx/5xx)
-        is_error = self.status_code >= 400
-        
-        # Get output
-        if self.json_data is not None:
-            output = json.dumps(self.json_data, indent=4, ensure_ascii=False)
-        else:
-            output = self.text
-        
-        # Truncate if too long
-        if len(output) > max_length:
-            output = output[:max_length] + f"\n... [truncated {len(output) - max_length} chars]"
-        
-        # For errors, be quiet unless verbose=True
-        if is_error and not verbose:
-            # Just show status code, no body - user will see full error in assert_status
-            print(f"[{self.status_code}] Error")
-            return self
-        
-        # Full output for success or verbose mode
+        # 1. Try writing directly to the real terminal (bypasses pytest capture)
         import sys
         try:
             if sys.__stdout__ and sys.__stdout__.writable():
@@ -298,9 +283,9 @@ class ApiResponse:
         except Exception:
             print(output)
         
-        # Also log
+        # 2. Log to logger (visible if log level is INFO/DEBUG)
         import logging
-        logging.getLogger("pyshaft.api").info(f"Response [{self.status_code}]:\n{output}")
+        logging.getLogger("pyshaft.api").info(f"Response Body:\n{output}")
         
         # 3. Attach to Allure Report if plugin is active
         try:
@@ -415,37 +400,19 @@ class ApiResponse:
         return None
 
     def _get_by_path(self, path: str) -> Any:
-        """Internal helper to traverse JSON by dot/bracket notation.
-        
-        Supports:
-        - data.id          → dict key
-        - data[0].id       → array index
-        - data[last].id    → last element in array
-        """
+        """Internal helper to traverse JSON by dot/bracket notation."""
         if self.json_data is None:
             raise ValueError("Response does not contain valid JSON")
         
         import re
-        # Strip $ prefix if present (JSONPath style)
-        path = path.lstrip("$")
-        
-        # Handle [last] specially - replace with index marker
-        path = path.replace("[last]", "[LAST_INDEX]")
-        
         # Convert brackets to dots: login[0].id -> login.0.id
-        # Also handles [LAST_INDEX] -> .LAST_INDEX
-        normalized = re.sub(r"\[(\w+)\]", r".\1", path)
+        normalized = re.sub(r"\[(\d+)\]", r".\1", path)
         parts = normalized.split(".")
         
         current = self.json_data
         for part in parts:
             if part == "": continue
-            if part == "LAST_INDEX":
-                if isinstance(current, list) and len(current) > 0:
-                    current = current[-1]  # Get last element
-                else:
-                    return None
-            elif isinstance(current, dict):
+            if isinstance(current, dict):
                 current = current.get(part)
             elif isinstance(current, list) and part.isdigit():
                 current = current[int(part)]

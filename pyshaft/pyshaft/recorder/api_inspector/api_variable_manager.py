@@ -71,6 +71,20 @@ class ApiVariableManager(QDockWidget):
         btn_row.addWidget(btn_del)
         var_layout.addLayout(btn_row)
         
+        # PyShaft Store integration
+        store_row = QHBoxLayout()
+        store_row.addWidget(QLabel("🔗 PyShaft Store:"))
+        store_row.addStretch()
+        btn_import = QPushButton("⬇ Import from Store")
+        btn_import.setToolTip("Import variables from pyshaft store (get)")
+        btn_import.clicked.connect(self._import_from_store)
+        store_row.addWidget(btn_import)
+        btn_export = QPushButton("⬆ Export to Store")
+        btn_export.setToolTip("Export variables to pyshaft store (set)")
+        btn_export.clicked.connect(self._export_to_store)
+        store_row.addWidget(btn_export)
+        var_layout.addLayout(store_row)
+        
         self._tabs.addTab(var_widget, "Variables")
 
         # ── Tab 2: Global Headers ──
@@ -214,3 +228,39 @@ class ApiVariableManager(QDockWidget):
                     del self._workflow.global_headers[name_item.text()]
             self._headers_table.removeRow(row)
             self.variables_changed.emit()
+
+    def _import_from_store(self) -> None:
+        """Import variables from pyshaft.api.store.get()"""
+        try:
+            from pyshaft.api import store as pyshaft_store
+            data = pyshaft_store.get()
+            if not data:
+                return
+            for key, value in data.items():
+                if key not in self._workflow.variables:
+                    row = self._table.rowCount()
+                    self._table.insertRow(row)
+                    self._table.setItem(row, 0, QTableWidgetItem(key))
+                    self._table.setItem(row, 1, QTableWidgetItem(str(value)))
+                    self._workflow.variables[key] = str(value)
+            self.variables_changed.emit()
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Import Failed", f"Could not import from store: {e}")
+
+    def _export_to_store(self) -> None:
+        """Export variables to pyshaft.api.store.set()"""
+        try:
+            from pyshaft.api import store as pyshaft_store
+            data = {}
+            for row in range(self._table.rowCount()):
+                name_item = self._table.item(row, 0)
+                value_item = self._table.item(row, 1)
+                if name_item and name_item.text():
+                    data[name_item.text()] = value_item.text() if value_item else ""
+            pyshaft_store.set(data)
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Exported", f"Exported {len(data)} variables to PyShaft store")
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Export Failed", f"Could not export to store: {e}")

@@ -97,6 +97,10 @@ class ApiHistoryDock(QDockWidget):
         if self._list.count() > 50:
             self._list.takeItem(self._list.count() - 1)
 
+    def refresh_history(self) -> None:
+        """Refresh the history display (no-op since entries are added live)."""
+        pass
+
     def clear_history(self) -> None:
         self._list.clear()
 

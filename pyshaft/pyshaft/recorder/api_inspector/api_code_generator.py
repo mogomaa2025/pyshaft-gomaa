@@ -68,17 +68,14 @@ def _dyn_expr(key: str) -> str:
     return _DYNAMIC_VAR_TO_PYTHON.get(key.lower(), f"None  # unknown: ${key}")
 
 
-def _str_to_py(value: str, use_pipeline: bool = True) -> str:
+def _str_to_py(value: str) -> str:
     """Convert a Postman template string to a Python source expression.
 
     "hello"              → '"hello"'
-    "{{baseURL}}"        → 'get_value("baseURL")'  (or baseURL if use_pipeline=False)
+    "{{baseURL}}"        → 'baseURL'
     "{{$randomInt}}"     → 'random.randint(0, 1_000)'
     "hi {{$randomInt}}"  → '"hi " + str(random.randint(0, 1_000))'
-    "{{a}}/{{b}}"        → 'str(get_value("a")) + "/" + str(get_value("b"))'
-    
-    Args:
-        use_pipeline: If True, use get_value() for {{var}} (recommended)
+    "{{a}}/{{b}}"        → 'str(a) + "/" + str(b)'
     """
     matches = list(_TEMPLATE_RE.finditer(value))
     if not matches:
@@ -87,12 +84,7 @@ def _str_to_py(value: str, use_pipeline: bool = True) -> str:
     # Whole string is exactly one template → bare expression
     if len(matches) == 1 and matches[0].start() == 0 and matches[0].end() == len(value):
         var = matches[0].group(1)
-        if var.startswith("$"):
-            return _dyn_expr(var[1:])
-        elif use_pipeline:
-            return f'get_value("{_clean_var(var)}")'
-        else:
-            return _clean_var(var)
+        return _dyn_expr(var[1:]) if var.startswith("$") else _clean_var(var)
 
     # Mixed → string concatenation (works on all Python versions)
     parts: list[str] = []
@@ -101,12 +93,7 @@ def _str_to_py(value: str, use_pipeline: bool = True) -> str:
         if m.start() > cursor:
             parts.append(f'"{value[cursor:m.start()]}"')
         var = m.group(1)
-        if var.startswith("$"):
-            expr = _dyn_expr(var[1:])
-        elif use_pipeline:
-            expr = f'get_value("{_clean_var(var)}")'
-        else:
-            expr = _clean_var(var)
+        expr = _dyn_expr(var[1:]) if var.startswith("$") else _clean_var(var)
         parts.append(f"str({expr})")
         cursor = m.end()
     if cursor < len(value):
@@ -218,41 +205,156 @@ def generate_api_code(target, mode: str = "test") -> str:
 def _gen_test(steps, name, base_url, variables) -> str:
     lines: list[str] = []
 
-    # Dynamic imports first
+    # ── Imports ──
     extra = _extra_imports(steps)
-    if _has_assertions(steps):
-        lines.append("import pytest")
+    lines.append("import pytest")
     lines.extend(extra)
-    lines.append("from pyshaft import api, get_value")
+    lines.append("from pyshaft.api import ApiClient")
     lines.append("")
     lines.append("")
 
-    test_name = "test_" + "".join(
-        c if c.isalnum() else "_" for c in name.lower()
-    ).strip("_") or "test_api"
-
-    lines.append("@pytest.mark.pyshaft_api")
-    lines.append(f"# @api.data_from_csv('data.csv')")
-    lines.append(f"# @api.data_from_json('data.json')")
-    lines.append(f"def {test_name}():")
-
+    # ── Fixture ──
+    lines.append("# ── Fixtures ──────────────────────────────────────────────")
+    lines.append("")
+    lines.append("@pytest.fixture(scope='module')")
+    lines.append("def api():")
+    lines.append('    """Create API client with base URL and auth."""')
     if base_url:
-        lines.append(f'    # api.base_url("{base_url}")')
+        lines.append(f'    client = ApiClient(base_url="{base_url}")')
+    else:
+        lines.append('    client = ApiClient()')
+
+    # Apply auth from first step that has it
+    for step in steps:
+        if step.auth_type == AuthType.BEARER and step.auth_value:
+            lines.append(f'    client.set_header("Authorization", "Bearer {step.auth_value}")')
+            break
+
+    lines.append("    yield client")
+    lines.append("")
+    lines.append("")
+
+    # ── Shared variables (for chaining) ──
+    if variables:
+        lines.append("# ── Variables ─────────────────────────────────────────────")
+        lines.append("_ctx = {}  # Shared context for variable chaining")
+        lines.append("")
+        for k, v in variables.items():
+            lines.append(f'_ctx["{k}"] = "{v}"')
+        lines.append("")
         lines.append("")
 
-    if variables:
-        for k, v in variables.items():
-            lines.append(f'    {_clean_var(k)} = "{v}"')
-        lines.append("")
+    # ── Tests ──
+    lines.append("# ── Tests ─────────────────────────────────────────────────")
+    lines.append("")
 
     for i, step in enumerate(steps):
-        lines.append(f"    # Step {i + 1}: {step.name}")
-        lines.append("    (")
+        fn_name = "test_" + "".join(
+            c if c.isalnum() else "_" for c in step.name.lower()
+        ).strip("_") or f"test_step_{i + 1}"
+
+        # Deduplicate function names
+        lines.append(f"@pytest.mark.order({i + 1})")
+
+        # Data-driven support
+        if step.loop_variable:
+            lines.append(f"@pytest.mark.parametrize('item', {step.loop_variable})")
+            lines.append(f"def {fn_name}(api, item):")
+        else:
+            lines.append(f"def {fn_name}(api):")
+
+        lines.append(f'    """{step.method.value} {step.name}"""')
+
+        # Build the request chain
+        lines.append("    resp = (")
         lines.extend(_chain(step, base_url, indent="        "))
         lines.append("    )")
         lines.append("")
 
+        # Status assertion as plain assert
+        expected = step.expected_status
+        if expected:
+            lines.append(f"    assert resp.status_code == {expected}, \\")
+            lines.append(f'        f"Expected {expected}, got {{resp.status_code}}"')
+            lines.append("")
+
+        # JSON assertions as plain assert
+        for a in step.assertions:
+            _gen_assert_line(lines, a, indent="    ")
+
+        # Extractions → save to _ctx
+        for e in step.extractions:
+            path_parts = e.json_path.strip("$.").split(".")
+            access = "resp.json()"
+            for part in path_parts:
+                if part.isdigit():
+                    access += f"[{part}]"
+                elif part == "[last]":
+                    access += "[-1]"
+                else:
+                    access += f'["{part}"]'
+            lines.append(f'    _ctx["{e.variable_name}"] = {access}')
+        
+        lines.append("")
+        lines.append("")
+
     return "\n".join(lines)
+
+
+def _gen_assert_line(lines: list[str], a: ApiAssertion, indent: str = "    ") -> None:
+    """Generate a plain Python assert statement from an ApiAssertion."""
+    path = a.path
+    raw = str(a.expected)
+
+    # Build accessor
+    accessor = "resp.json()"
+    if path and path != "$":
+        for part in path.strip("$.").split("."):
+            if part.isdigit():
+                accessor += f"[{part}]"
+            elif "[*]" in part:
+                base = part.replace("[*]", "")
+                accessor = f"[item{_accessor_suffix(part.split('[*]')[1])} for item in {accessor}[\"{base}\"]]" if base else accessor
+                continue
+            else:
+                accessor += f'["{part}"]'
+
+    # Format expected value
+    expected = _format_expected(raw)
+
+    if a.type == AssertionType.JSON_PATH_EQUALS:
+        lines.append(f"{indent}assert {accessor} == {expected}")
+    elif a.type == AssertionType.JSON_PATH_CONTAINS:
+        lines.append(f"{indent}assert {expected} in str({accessor})")
+    elif a.type == AssertionType.JSON_PATH_TYPE:
+        type_map = {"int": "int", "str": "str", "float": "float", "bool": "bool", "list": "list", "dict": "dict"}
+        py_type = type_map.get(raw, "str")
+        lines.append(f"{indent}assert isinstance({accessor}, {py_type})")
+    elif a.type == AssertionType.JSON_SCHEMA:
+        lines.append(f"{indent}# Schema assertion — use jsonschema.validate()")
+
+
+def _accessor_suffix(suffix: str) -> str:
+    """Build accessor suffix for array iteration."""
+    if not suffix:
+        return ""
+    parts = suffix.strip(".").split(".")
+    return "".join(f'["{p}"]' for p in parts if p)
+
+
+def _format_expected(raw: str) -> str:
+    """Format a raw expected value to a valid Python expression."""
+    if raw.lower() == "true": return "True"
+    if raw.lower() == "false": return "False"
+    if raw.lower() == "null": return "None"
+    # Check if it's a variable reference
+    if raw.startswith("{{") and raw.endswith("}}"):
+        return f'_ctx["{raw[2:-2]}"]'
+    try:
+        if "." in raw: float(raw); return raw
+        else: int(raw); return raw
+    except ValueError:
+        return f'"{raw}"'
 
 
 # ---------------------------------------------------------------------------
@@ -406,21 +508,6 @@ def _chain(step: ApiRequestStep, base_url: str = "", indent: str = "", is_pom: b
                     lines.append(f'{indent}.assert_schema({schema}, path="{path}")')
             except Exception:
                 lines.append(f"{indent}.assert_schema({a.expected})")
-        elif a.type == AssertionType.DEEP_EQUALS:
-            # Parse the JSON string to pretty-print it
-            try:
-                expected_obj = json.loads(a.expected)
-                expected_str = json.dumps(expected_obj, indent=4).replace("\n", "\n" + indent + "    ")
-                lines.append(f'{indent}.assert_deep_equals("{path}", {expected_str})')
-            except Exception:
-                lines.append(f'{indent}.assert_deep_equals("{path}", {a.expected})')
-        elif a.type == AssertionType.DEEP_CONTAINS:
-            try:
-                expected_obj = json.loads(a.expected)
-                expected_str = json.dumps(expected_obj, indent=4).replace("\n", "\n" + indent + "    ")
-                lines.append(f'{indent}.assert_deep_contains("{path}", {expected_str})')
-            except Exception:
-                lines.append(f'{indent}.assert_deep_contains("{path}", {a.expected})')
 
     # Extractions
     for e in step.extractions:

@@ -23,7 +23,6 @@ def test_Create_importer_exporter():
         .assert_json("$.statusCode", 201)
         .assert_json("$.message", "تم الحفظ بنجاح")
         .assert_json("$.success", True)
-        .extract_json("$.data", "exporter_id")
     )
     print("success created importer exporter with id", get_value("exporter_id"))
 
@@ -39,11 +38,11 @@ def test_Get_Importer_Exporter():
         .assert_status(200)
         .assert_json("$.statusCode", 200)
         .assert_json("$.success", True)
-        .assert_json("$.message", "Success")          # english message should be arabic
+        .assert_json("$.message", "Success")
+
+        # english message should be arabic
         .assert_json("$.data.id", importer_exporter_id)
     )
-
-
 
 @pytest.mark.pyshaft_api
 def test_Get_All_Importer_Exporter():
@@ -53,9 +52,12 @@ def test_Get_All_Importer_Exporter():
         api.request()
         .get(str(swagger_base_url) + f"/v1/importer-exporter")
         .log()
-        .assert_json_contains("$.data.id", importer_exporter_id)
+        .assert_deep_contains("$.data", {
+            "id": importer_exporter_id
+        })
         .assert_status(200)
     )
+
 
 @pytest.mark.pyshaft_api
 def test_Get_filtered_and_paginated():

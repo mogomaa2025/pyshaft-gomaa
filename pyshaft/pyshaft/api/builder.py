@@ -278,42 +278,31 @@ class RequestBuilder:
         self._ensure_performed().assert_json_in_array(path, criteria)
         return self
 
+    def find(self, path: str, criteria: dict) -> Any:
+        """Find first item in array at path matching criteria."""
+        return self._ensure_performed().find(path, criteria)
+
+    def find_and_store(self, path: str, criteria: dict, key: str) -> "RequestBuilder":
+        """Find item, store it, and continue the chain."""
+        self._ensure_performed().find_and_store(path, criteria, key)
+        return self
+
     def assert_schema(self, schema: dict, path: str = "$") -> RequestBuilder:
         self._ensure_performed().assert_schema(schema, path=path)
-        return self
-
-    def assert_deep_equals(self, path: str, expected: Any) -> RequestBuilder:
-        """Assert that a JSON object at path deeply equals the expected object."""
-        self._ensure_performed().assert_deep_equals(path, expected)
-        return self
-
-    def assert_deep_contains(self, path: str, expected: dict) -> RequestBuilder:
-        """Assert that a JSON object at path contains all key-value pairs from expected."""
-        self._ensure_performed().assert_deep_contains(path, expected)
         return self
 
     def assert_partial_schema(self, schema: dict, ignore_keys: list[str], path: str = "$") -> RequestBuilder:
         self._ensure_performed().assert_partial_schema(schema, ignore_keys, path=path)
         return self
 
-    def log(self, verbose: bool = True, max_length: int = 2000) -> RequestBuilder:
-        """Log/print the response JSON in pretty format.
-        
-        Args:
-            verbose: If True, show full response. If False, show minimal output (default: True)
-            max_length: Truncate output longer than this (default: 2000 chars)
-        """
-        self._ensure_performed().log(verbose=verbose, max_length=max_length)
+    def prettify(self) -> RequestBuilder:
+        """Execute and print the pretty response body."""
+        self._ensure_performed().prettify()
         return self
 
-    def prettify(self, verbose: bool = True, max_length: int = 2000) -> RequestBuilder:
-        """Alias for log(). Execute and print the pretty response body.
-        
-        Args:
-            verbose: If True, show full response. If False, show minimal output (default: True)
-            max_length: Truncate output longer than this (default: 2000 chars)
-        """
-        self._ensure_performed().log(verbose=verbose, max_length=max_length)
+    def log(self) -> RequestBuilder:
+        """Alias for prettify(). Log request/response details."""
+        self._ensure_performed().log()
         return self
 
     def extract_json(self, path: str, key: str) -> RequestBuilder:

@@ -518,6 +518,13 @@ class MainWindow(QMainWindow):
         restore_btn.clicked.connect(self._restore_layout)
         toolbar_layout.addWidget(restore_btn)
 
+        # Session/Cookies button
+        self._cookies_btn = QPushButton("🍪")
+        self._cookies_btn.setToolTip("Save Session Cookies (skip login)")
+        self._cookies_btn.setFixedSize(28, 28)
+        self._cookies_btn.clicked.connect(self._save_session_cookies)
+        toolbar_layout.addWidget(self._cookies_btn)
+
         _add_vsep()
 
         # ── Navigation / Session ──────────────────────────────────────
@@ -618,6 +625,28 @@ class MainWindow(QMainWindow):
             
             h_layout.addStretch()
             
+            run_direct_btn = QPushButton("▶ Run Selected")
+            run_direct_btn.setFixedSize(90, 22)
+            run_direct_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            run_direct_btn.setStyleSheet(f"""
+                QPushButton {{
+                    font-size: 10px; padding: 0; background: {COLORS['bg_card']}; border: 1px solid {COLORS['border']}; color: {COLORS['accent_green']}; font-weight: bold;
+                }}
+                QPushButton:hover {{ background: {COLORS['bg_hover']}; }}
+            """)
+            h_layout.addWidget(run_direct_btn)
+
+            run_test_btn = QPushButton("🧪 Run as Test")
+            run_test_btn.setFixedSize(90, 22)
+            run_test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            run_test_btn.setStyleSheet(f"""
+                QPushButton {{
+                    font-size: 10px; padding: 0; background: {COLORS['bg_card']}; border: 1px solid {COLORS['border']}; color: {COLORS['accent_purple']}; font-weight: bold;
+                }}
+                QPushButton:hover {{ background: {COLORS['bg_hover']}; }}
+            """)
+            h_layout.addWidget(run_test_btn)
+            
             copy_btn = QPushButton(f"{ICONS.get('copy', '📋')} Copy")
             copy_btn.setFixedSize(65, 22)
             copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -636,20 +665,26 @@ class MainWindow(QMainWindow):
             
             copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(editor.toPlainText()))
             
-            return container, editor
+            return container, editor, run_direct_btn, run_test_btn
 
-        self._code_container, self._code_output = create_code_editor_with_copy()
+        self._code_container, self._code_output, run_direct_btn, run_test_btn = create_code_editor_with_copy()
         bottom_tabs.addTab(self._code_container, f"{ICONS['code']}  Code")
+        
+        run_direct_btn.clicked.connect(lambda: self._run_editor_code(self._code_output, direct=True))
+        run_test_btn.clicked.connect(lambda: self._run_editor_code(self._code_output, direct=False))
         
         # POM Tab container
         self._pom_tab_widget = QTabWidget()
-        self._test_container, self._test_output = create_code_editor_with_copy("TEST")
-        self._page_container, self._page_output = create_code_editor_with_copy("PAGE")
-        self._data_container, self._data_output = create_code_editor_with_copy("DATA")
+        self._test_container, self._test_output, t_run_dir, t_run_test = create_code_editor_with_copy("TEST")
+        self._page_container, self._page_output, _, _ = create_code_editor_with_copy("PAGE")
+        self._data_container, self._data_output, _, _ = create_code_editor_with_copy("DATA")
 
         self._pom_tab_widget.addTab(self._test_container, "test.py")
         self._pom_tab_widget.addTab(self._page_container, "page.py")
         self._pom_tab_widget.addTab(self._data_container, "data.py")
+        
+        t_run_dir.clicked.connect(lambda: self._run_editor_code(self._test_output, direct=True))
+        t_run_test.clicked.connect(lambda: self._run_editor_code(self._test_output, direct=False))
         
         bottom_tabs.addTab(self._pom_tab_widget, "📦  POM")
 
@@ -668,11 +703,18 @@ class MainWindow(QMainWindow):
         # Add as corner widget
         bottom_tabs.setCornerWidget(self._code_mode_combo, Qt.Corner.TopRightCorner)
 
-        # Workflow tab
         self._workflow_view = WorkflowView()
         self._workflow_view.step_removed.connect(self._on_step_deleted)
         self._workflow_view.step_edited.connect(self._on_step_edit)
         bottom_tabs.addTab(self._workflow_view, f"{ICONS['workflow']}  Workflow")
+
+        # Console Tab
+        from pyshaft.recorder.shared.console_dock import PyShaftConsole
+        self._console_tab = PyShaftConsole(self)
+        bottom_tabs.addTab(self._console_tab, "🖥 Console")
+
+        self._bottom_tabs_widget = bottom_tabs
+
 
         main_layout.addWidget(self._web_view)
         self.setCentralWidget(central)
@@ -811,6 +853,53 @@ class MainWindow(QMainWindow):
         self._bottom_dock.show()
         self._bottom_dock.setFloating(False)
         self._status_bar_label.setText("Layout Restored")
+
+    def _save_session_cookies(self):
+        """Save current browser cookies to session for session restoration."""
+        if not self._browser_bridge:
+            self._status_bar_label.setText("No browser connected")
+            return
+        
+        try:
+            import json
+            raw_cookies = self._browser_bridge.get_cookies()
+            
+            if not raw_cookies:
+                self._status_bar_label.setText("No cookies found")
+                return
+            
+            # Convert to PyShaft format
+            cookies = []
+            for c in raw_cookies:
+                cookies.append({
+                    "name": c.get("name", ""),
+                    "value": c.get("value", ""),
+                    "domain": c.get("domain", ""),
+                    "path": c.get("path", "/"),
+                    "secure": c.get("secure", False),
+                    "httpOnly": c.get("httpOnly", False),
+                })
+            
+            # Save to session (replace existing, don't duplicate)
+            self._session.cookies = cookies
+            
+            # Add a special step to indicate session restore (only if not already added)
+            has_restore_step = any(
+                step.action == "_session_restore" for step in self._session.steps
+            )
+            if not has_restore_step:
+                step = RecordedStep(
+                    action="_session_restore",
+                    locator_value=json.dumps(cookies),
+                    timestamp=time.time(),
+                )
+                self._step_list.add_step(step)
+            
+            self._status_bar_label.setText(f"Saved {len(cookies)} cookies (session restore enabled)")
+            self._refresh_all()
+            
+        except Exception as e:
+            self._status_bar_label.setText(f"Failed to save cookies: {e}")
 
     def _toggle_recording(self):
         if self._is_recording:
@@ -1288,6 +1377,49 @@ class MainWindow(QMainWindow):
                 if result:
                     self._step_list.add_step(result)
                     self._refresh_all()
+
+    def _run_editor_code(self, editor: QPlainTextEdit, direct: bool = True) -> None:
+        """Run the selected code or full code from the editor via CodeRunner."""
+        from pyshaft.recorder.shared.code_runner import CodeRunner
+
+        cursor = editor.textCursor()
+        code = cursor.selectedText().replace("\u2029", "\n")
+        
+        if not code:
+            code = editor.toPlainText()
+            
+            # If running directly and no selection, we need to append the function call
+            if direct:
+                lines = []
+                for line in code.split("\n"):
+                    if line.startswith("def test_"):
+                        test_fn_name = line.split("def ")[1].split("(")[0]
+                        lines.append(f"{test_fn_name}()")
+                if lines:
+                    code += "\n\n" + "\n".join(lines)
+        
+        # Switch to console tab
+        for i in range(self._bottom_tabs_widget.count()):
+            if self._bottom_tabs_widget.widget(i) is self._console_tab:
+                self._bottom_tabs_widget.setCurrentIndex(i)
+                break
+                
+        self._status_bar_label.setText("🚀 Running code..." if direct else "🧪 Running test...")
+        
+        if direct:
+            CodeRunner.run_directly(
+                code,
+                self._console_tab,
+                on_success=lambda: self._status_bar_label.setText("✅ Execution finished"),
+                on_error=lambda e: self._status_bar_label.setText(f"❌ Error: {e}")
+            )
+        else:
+            CodeRunner.run_as_test(
+                code,
+                self._console_tab,
+                on_success=lambda: self._status_bar_label.setText("✅ Test execution passed"),
+                on_error=lambda e: self._status_bar_label.setText(f"❌ Test execution failed")
+            )
 
     # -------------------------------------------------------------------------
     # Cleanup

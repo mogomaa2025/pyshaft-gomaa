@@ -30,6 +30,8 @@ class ApiCodeDock(QDockWidget):
     """Dockable panel for live PyShaft code preview with Script/POM modes."""
     
     code_modified = pyqtSignal(str) # Emitted when manual edits occur
+    run_selected_requested = pyqtSignal(str)  # Emitted with selected/all code to run directly
+    run_as_test_requested = pyqtSignal(str)   # Emitted with code to run as pytest
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("PyShaft Code", parent)
@@ -58,9 +60,22 @@ class ApiCodeDock(QDockWidget):
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         toolbar.addWidget(self._mode_combo)
         
-        btn_copy = QPushButton("📋 Copy Code")
+        btn_copy = QPushButton("📋 Copy")
         btn_copy.clicked.connect(self._copy_to_clipboard)
         toolbar.addWidget(btn_copy)
+        
+        btn_run_sel = QPushButton("▶ Run Selected")
+        btn_run_sel.setToolTip("Run selected code or all code directly")
+        btn_run_sel.setStyleSheet("font-weight: 700;")
+        btn_run_sel.clicked.connect(self._on_run_selected)
+        toolbar.addWidget(btn_run_sel)
+        
+        btn_run_test = QPushButton("🧪 Run as Test")
+        btn_run_test.setToolTip("Run code as a pytest test with PyShaft report")
+        btn_run_test.setStyleSheet("font-weight: 700;")
+        btn_run_test.clicked.connect(self._on_run_as_test)
+        toolbar.addWidget(btn_run_test)
+        
         toolbar.addStretch()
         layout.addLayout(toolbar)
 
@@ -184,3 +199,16 @@ class ApiCodeDock(QDockWidget):
     def _copy_to_clipboard(self) -> None:
         from PyQt6.QtWidgets import QApplication
         QApplication.clipboard().setText(self._code_edit.toPlainText())
+
+    def _on_run_selected(self) -> None:
+        """Run selected text, or all code if nothing is selected."""
+        cursor = self._code_edit.textCursor()
+        code = cursor.selectedText().replace('\u2029', '\n') if cursor.hasSelection() else self._code_edit.toPlainText()
+        if code.strip():
+            self.run_selected_requested.emit(code)
+
+    def _on_run_as_test(self) -> None:
+        """Run the full code as a pytest test."""
+        code = self._code_edit.toPlainText()
+        if code.strip():
+            self.run_as_test_requested.emit(code)

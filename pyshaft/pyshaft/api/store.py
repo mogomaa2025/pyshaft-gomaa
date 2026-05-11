@@ -48,3 +48,28 @@ def clear_store() -> None:
             os.remove(STORE_FILE)
         except IOError:
             pass
+
+def set(key: str, value: Any) -> None:
+    """Store a value with a key (alias for store_data)."""
+    store_data(key, value)
+
+def get(key: str) -> Any:
+    """Retrieve a stored value by key (alias for get_stored)."""
+    return get_stored(key)
+
+
+class Pipeline:
+    """Fluent pipeline for storing and retrieving values."""
+    
+    def set(self, key: str, value: Any) -> "Pipeline":
+        store_data(key, value)
+        return self
+        
+    def get(self, key: str) -> Any:
+        return get_stored(key)
+        
+    def clear(self) -> "Pipeline":
+        clear_store()
+        return self
+
+pipeline = Pipeline()

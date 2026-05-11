@@ -112,42 +112,30 @@ class ApiEngine:
         self._get_builder().assert_json_in_array(path, criteria)
         return self
 
+    def find(self, path: str, criteria: dict) -> Any:
+        """Find first item in array at path matching criteria."""
+        return self._get_builder().find(path, criteria)
+
+    def find_and_store(self, path: str, criteria: dict, key: str) -> "ApiEngine":
+        """Find item, store it, and continue the chain."""
+        self._get_builder().find_and_store(path, criteria, key)
+        return self
+
     def assert_schema(self, schema: dict, path: str = "$") -> ApiEngine:
         self._get_builder().assert_schema(schema, path=path)
-        return self
-
-    def assert_deep_equals(self, path: str, expected: Any) -> ApiEngine:
-        """Assert that a JSON object at path deeply equals the expected object."""
-        self._get_builder().assert_deep_equals(path, expected)
-        return self
-
-    def assert_deep_contains(self, path: str, expected: dict) -> ApiEngine:
-        """Assert that a JSON object at path contains all key-value pairs from expected."""
-        self._get_builder().assert_deep_contains(path, expected)
         return self
 
     def assert_partial_schema(self, schema: dict, ignore_keys: list[str], path: str = "$") -> ApiEngine:
         self._get_builder().assert_partial_schema(schema, ignore_keys, path=path)
         return self
 
-    def log(self, verbose: bool = True, max_length: int = 2000) -> ApiEngine:
-        """Log/print the response in pretty format.
-        
-        Args:
-            verbose: If True, show full response. If False, show minimal output (default: True)
-            max_length: Truncate output longer than this (default: 2000 chars)
-        """
-        self._get_builder().log(verbose=verbose, max_length=max_length)
+    def prettify(self) -> ApiEngine:
+        self._get_builder().prettify()
         return self
 
-    def prettify(self, verbose: bool = True, max_length: int = 2000) -> ApiEngine:
-        """Alias for log(). Print response in pretty format.
-        
-        Args:
-            verbose: If True, show full response. If False, show minimal output (default: True)
-            max_length: Truncate output longer than this (default: 2000 chars)
-        """
-        self._get_builder().log(verbose=verbose, max_length=max_length)
+    def log(self) -> ApiEngine:
+        """Alias for prettify(). Log request/response details."""
+        self._get_builder().log()
         return self
 
     def extract_json(self, path: str, key: str) -> ApiEngine:
@@ -173,10 +161,9 @@ class ApiEngine:
             self._current_builder.get(url)
             self._current_builder.extra(**kwargs)
             return self
-        # Auto-create builder for resolution support
-        self._current_builder = RequestBuilder("GET", url)
-        self._current_builder.extra(**kwargs)
-        return self
+        # Use the imported function directly, not the overwritten alias
+        from pyshaft.api.methods import send_get as _send_get
+        return _send_get(url, **kwargs)
 
     def post(self, url: str, body: Any = None, **kwargs: Any) -> Any:
         """Send a POST request."""
@@ -185,40 +172,25 @@ class ApiEngine:
             self._current_builder.body(body)
             self._current_builder.extra(**kwargs)
             return self
-        # Auto-create builder for resolution support
-        self._current_builder = RequestBuilder("POST", url)
-        self._current_builder.body(body)
-        self._current_builder.extra(**kwargs)
-        return self
+        return send_post(url, body, **kwargs)
 
     def put(self, url: str, body: Any = None, **kwargs: Any) -> Any:
         if self._current_builder is not None:
             self._current_builder.put(url).body(body).extra(**kwargs)
             return self
-        # Auto-create builder for resolution support
-        self._current_builder = RequestBuilder("PUT", url)
-        self._current_builder.body(body)
-        self._current_builder.extra(**kwargs)
-        return self
+        return send_put(url, body, **kwargs)
 
     def patch(self, url: str, body: Any = None, **kwargs: Any) -> Any:
         if self._current_builder is not None:
             self._current_builder.patch(url).body(body).extra(**kwargs)
             return self
-        # Auto-create builder for resolution support
-        self._current_builder = RequestBuilder("PATCH", url)
-        self._current_builder.body(body)
-        self._current_builder.extra(**kwargs)
-        return self
+        return send_patch(url, body, **kwargs)
 
     def delete(self, url: str, **kwargs: Any) -> Any:
         if self._current_builder is not None:
             self._current_builder.delete(url).extra(**kwargs)
             return self
-        # Auto-create builder for resolution support
-        self._current_builder = RequestBuilder("DELETE", url)
-        self._current_builder.extra(**kwargs)
-        return self
+        return send_delete(url, **kwargs)
 
     # --- Compatibility & Aliases ---
 
@@ -291,12 +263,8 @@ expect = api.expect
 prettify = api.prettify
 assert_json_path = api.assert_json_path
 
-# Aliases for backward compatibility
-send_get = api.get
-send_post = api.post
-send_put = api.put
-send_patch = api.patch
-send_delete = api.delete
+# Note: Don't overwrite send_get/send_post/send_put/send_patch/send_delete
+# They are functions from pyshaft.api.methods
 
 __all__ = [
     "api",

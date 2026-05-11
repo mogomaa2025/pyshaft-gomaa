@@ -38,9 +38,8 @@ screenshot_on_step = false
 video_on_fail = false
 junit_xml = true
 json_report = true
-open_on_fail = true
 
 [api]
 base_url = ""
 timeout = 30
-verify_ssl = true
+verify_ssl = false

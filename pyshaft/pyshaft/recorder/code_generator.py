@@ -67,14 +67,26 @@ def generate_code(
     lines.append("")
     lines.append("")
 
+    # Add session restore if cookies exist
+    if session.cookies:
+        import json
+        cookies_json = json.dumps(session.cookies, ensure_ascii=False)
+        lines.append("# Session Restore (login state)")
+        lines.append(f"w.set_cookies({cookies_json})")
+        lines.append(f'w.open_url("{session.start_url or "https://example.com"}")')
+        lines.append("")
+
     # Test function
     lines.append("@pytest.mark.pyshaft_web")
     lines.append(f"def {test_name}():")
 
+    # Filter out _session_restore steps (already handled above)
+    filtered_steps = [s for s in session.steps if s.action != "_session_restore"]
+    
     if mode == "chain":
-        lines.extend(_generate_chain_mode(session.steps))
+        lines.extend(_generate_chain_mode(filtered_steps))
     else:
-        lines.extend(_generate_flat_mode(session.steps))
+        lines.extend(_generate_flat_mode(filtered_steps))
 
     lines.append("")
     return "\n".join(lines)

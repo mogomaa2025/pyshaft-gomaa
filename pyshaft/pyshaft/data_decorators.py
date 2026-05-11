@@ -130,17 +130,20 @@ def data_from(path: str, key: str | None = None) -> Callable:
     return decorator
 
 
-class parametrize:
-    """Pytest-like parametrize decorator for PyShaft.
+class data_parametrize:
+    """Data parametrize decorator for PyShaft - use this instead of pytest.mark.parametrize.
     
     Usage:
-        @parametrize("email", ["a@test.com", "b@test.com"])
+        @data_parametrize("email", ["a@test.com", "b@test.com"])
         def test_email(email):
             api.post("/users").body({"email": email})
         
-        @parametrize({"email": "a@test.com", "role": "admin"})
+        @data_parametrize({"email": "a@test.com", "role": "admin"})
         def test_user(data):
             api.post("/users").body(data)
+    
+    Note: For best results with pytest, use @pytest.mark.parametrize instead:
+        @pytest.mark.parametrize("email", ["a@test.com", "b@test.com"])
     """
     
     def __init__(self, *args, **kwargs):

@@ -20,11 +20,14 @@ Usage in test files:
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+logger = logging.getLogger("pyshaft.fixtures")
 
 from pyshaft.api import api, clear as clear_api_store
 from pyshaft.session import session_context
@@ -223,6 +226,30 @@ def cleanup_after_test():
         w.flush()
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def run_hooks(request: pytest.FixtureRequest):
+    """Run pre_test and post_test hooks automatically."""
+    from pyshaft.utils import get_pre_test_hooks, get_post_test_hooks
+    
+    # Run pre-test hooks
+    for hook in get_pre_test_hooks():
+        try:
+            hook()
+        except Exception as e:
+            logger = logging.getLogger("pyshaft.fixtures")
+            logger.error(f"Pre-test hook {hook.__name__} failed: {e}")
+    
+    yield
+    
+    # Run post-test hooks
+    for hook in get_post_test_hooks():
+        try:
+            hook()
+        except Exception as e:
+            logger = logging.getLogger("pyshaft.fixtures")
+            logger.error(f"Post-test hook {hook.__name__} failed: {e}")
 
 
 # ---------------------------------------------------------------------------

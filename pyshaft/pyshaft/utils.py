@@ -226,6 +226,63 @@ def tag(*tags: str) -> Callable:
 
 
 # -------------------------------------------------------------------------
+# Pre-Test and Post-Test Hook Decorators
+# -------------------------------------------------------------------------
+
+_pre_test_hooks: list[Callable] = []
+_post_test_hooks: list[Callable] = []
+
+
+def pre_test(func: Callable) -> Callable:
+    """Decorator to mark a function as a pre-test hook.
+    
+    This function runs BEFORE every test that uses the web/api modules.
+    Use for:
+    - Login setup
+    - Session restoration
+    - Data preparation
+    - Opening base URL
+    
+    Example:
+        @pre_test
+        def setup_session():
+            w.open_url("https://app.example.com")
+            w.type("admin", role, textbox)
+            w.click("Login")
+    """
+    _pre_test_hooks.append(func)
+    return func
+
+
+def post_test(func: Callable) -> Callable:
+    """Decorator to mark a function as a post-test hook.
+    
+    This function runs AFTER every test. Use for:
+    - Cleanup
+    - Screenshots on failure
+    - Logging results
+    - Test data teardown
+    
+    Example:
+        @post_test
+        def cleanup_test_data():
+            api.delete(f"/test-data/{get('test_id')}")
+    """
+    _post_test_hooks.append(func)
+    return func
+
+
+def get_pre_test_hooks() -> list[Callable]:
+    """Get all registered pre-test hooks."""
+    return _pre_test_hooks.copy()
+
+
+def get_post_test_hooks() -> list[Callable]:
+    """Get all registered post-test hooks."""
+    return _post_test_hooks.copy()
+
+
+# -------------------------------------------------------------------------
 # Convenience aliases
 # -------------------------------------------------------------------------
 
@@ -242,4 +299,8 @@ __all__ = [
     "retry",
     "retry_on_exception",
     "tag",
+    "pre_test",
+    "post_test",
+    "get_pre_test_hooks",
+    "get_post_test_hooks",
 ]

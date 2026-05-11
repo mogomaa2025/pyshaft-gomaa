@@ -24,25 +24,11 @@ def main() -> None:
     run_parser.add_argument("--demo", action="store_true", help="Enable demo mode")
     run_parser.add_argument("--headless", action="store_true", help="Run in headless mode")
     run_parser.add_argument("--browser", type=str, help="Browser override (chrome/firefox/edge)")
-    run_parser.add_argument("--env", type=str, default="dev", help="Environment (dev/staging/prod)")
-    run_parser.add_argument("--tags", "-t", type=str, help="Run tests with specific tags (e.g., 'smoke', 'api')")
-    run_parser.add_argument("--exclude-tags", type=str, help="Exclude tests with specific tags")
-    run_parser.add_argument("--parallel", "-n", type=str, help="Number of parallel workers (auto or number)")
-    run_parser.add_argument("--rerun", "-r", type=int, default=0, help="Number of retry attempts on failure")
     run_parser.add_argument("args", nargs="*", help="Additional pytest arguments")
 
-    # pyshaft run-all (run all tests in a suite)
-    run_all_parser = subparsers.add_parser("run-all", help="Run all tests with default configuration")
-    run_all_parser.add_argument("--env", type=str, default="dev", help="Environment (dev/staging/prod)")
-    run_all_parser.add_argument("--headless", action="store_true", help="Run in headless mode")
-    run_all_parser.add_argument("--report", action="store_true", help="Generate HTML report after run")
-    run_all_parser.add_argument("args", nargs="*", help="Additional pytest arguments")
-
-    # pyshaft run-suite (run specific test suite)
-    suite_parser = subparsers.add_parser("run-suite", help="Run a specific test suite")
-    suite_parser.add_argument("suite", type=str, help="Suite name (api/web/integration)")
-    suite_parser.add_argument("--env", type=str, default="dev", help="Environment")
-    suite_parser.add_argument("--tags", "-t", type=str, help="Filter by tags")
+    # pyshaft init
+    init_parser = subparsers.add_parser("init", help="Initialize a PyShaft enterprise project structure")
+    init_parser.add_argument("--dir", "-d", type=str, default=".", help="Directory to initialize in (default: current)")
 
     # pyshaft inspect
     inspect_parser = subparsers.add_parser(
@@ -84,10 +70,8 @@ def main() -> None:
     match args.command:
         case "run":
             _run_tests(args)
-        case "run-all":
-            _run_all_tests(args)
-        case "run-suite":
-            _run_suite(args)
+        case "init":
+            _init_project(args)
         case "inspect":
             _launch_recorder(args, mode="inspect")
         case "record":
@@ -109,97 +93,17 @@ def _run_tests(args: argparse.Namespace) -> None:
 
     cmd = [sys.executable, "-m", "pytest"]
 
-    # Set environment
-    os.environ["PYSHAFT_ENV"] = args.env if hasattr(args, 'env') else "dev"
-
     if args.headless:
         os.environ["PYSHAFT_HEADLESS"] = "true"
 
     if args.browser:
         os.environ["PYSHAFT_BROWSER"] = args.browser
 
-    # Tag filtering
-    if hasattr(args, 'tags') and args.tags:
-        cmd.extend(["-m", args.tags])
-    if hasattr(args, 'exclude_tags') and args.exclude_tags:
-        cmd.extend(["-m", f"not {args.exclude_tags}"])
-
-    # Parallel execution
-    if hasattr(args, 'parallel') and args.parallel:
-        cmd.extend(["-n", args.parallel])
-
-    # Retry attempts
-    if hasattr(args, 'rerun') and args.rerun > 0:
-        cmd.extend(["--reruns", str(args.rerun)])
-
     # Pass through additional args
     if args.args:
         cmd.extend(args.args)
 
     print(f"PyShaft: Running tests with {' '.join(cmd)}")
-    result = subprocess.run(cmd)
-    sys.exit(result.returncode)
-
-
-def _run_all_tests(args: argparse.Namespace) -> None:
-    """Run all tests with default configuration."""
-    import os
-    from pathlib import Path
-
-    cmd = [sys.executable, "-m", "pytest"]
-
-    # Set environment
-    os.environ["PYSHAFT_ENV"] = args.env
-    if args.headless:
-        os.environ["PYSHAFT_HEADLESS"] = "true"
-
-    # Auto-discover test paths
-    test_paths = []
-    for pattern in ["tests/", "tests/**/*.py"]:
-        test_paths.extend(Path(".").glob(pattern))
-    if test_paths:
-        # Find unique test directories
-        dirs = set(str(p.parent) for p in test_paths if p.suffix == ".py" and "test_" in p.name)
-        cmd.extend(sorted(dirs)[:3])  # Add up to 3 test directories
-
-    if args.report:
-        cmd.extend(["--html=pyshaft-report/index.html", "--self-contained-html"])
-
-    if args.args:
-        cmd.extend(args.args)
-
-    print(f"PyShaft: Running all tests...")
-    print(f"  Environment: {args.env}")
-    print(f"  Headless: {args.headless}")
-    print(f"  Command: {' '.join(cmd)}\n")
-    result = subprocess.run(cmd)
-    sys.exit(result.returncode)
-
-
-def _run_suite(args: argparse.Namespace) -> None:
-    """Run a specific test suite."""
-    import os
-
-    suite_map = {
-        "api": "tests/unit/test_api*.py",
-        "web": "tests/unit/test_*.py",
-        "integration": "tests/integration/",
-    }
-
-    if args.suite not in suite_map:
-        print(f"Unknown suite: {args.suite}")
-        print(f"Available suites: {', '.join(suite_map.keys())}")
-        sys.exit(1)
-
-    cmd = [sys.executable, "-m", "pytest", suite_map[args.suite]]
-    os.environ["PYSHAFT_ENV"] = args.env
-
-    if args.tags:
-        cmd.extend(["-m", args.tags])
-
-    print(f"PyShaft: Running {args.suite} suite...")
-    result = subprocess.run(cmd)
-    sys.exit(result.returncode)
     result = subprocess.run(cmd)
     sys.exit(result.returncode)
 
@@ -278,6 +182,94 @@ def _serve_report(port: int = 5000, report_dir: str = "pyshaft-report") -> None:
     app.run(host="0.0.0.0", port=port, debug=False)
 
 
+def _init_project(args: argparse.Namespace) -> None:
+    """Initialize a PyShaft project structure."""
+    from pathlib import Path
+    
+    base_dir = Path(args.dir).resolve()
+    print(f"Initializing PyShaft Enterprise Project in {base_dir}")
+    
+    # 1. Create directories
+    dirs = [
+        "tests/api",
+        "tests/web",
+        "tests/data",
+        "tests/pages",
+        "reports",
+        ".github/workflows",
+    ]
+    for d in dirs:
+        path = base_dir / d
+        path.mkdir(parents=True, exist_ok=True)
+        # Add __init__.py to test dirs
+        if d.startswith("tests/"):
+            (path / "__init__.py").touch()
+            
+    # Create top level __init__.py
+    (base_dir / "tests" / "__init__.py").touch()
+    
+    # 2. pytest.ini
+    pytest_ini = base_dir / "pytest.ini"
+    if not pytest_ini.exists():
+        pytest_ini.write_text(
+            "[pytest]\n"
+            "testpaths = tests\n"
+            "python_files = test_*.py\n"
+            "markers =\n"
+            "    pyshaft_api: mark test as API test\n"
+            "    pyshaft_web: mark test as Web test\n"
+            "addopts = -v --tb=short\n",
+            encoding="utf-8"
+        )
+        
+    # 3. conftest.py
+    conftest = base_dir / "tests" / "conftest.py"
+    if not conftest.exists():
+        conftest.write_text(
+            "import pytest\n"
+            "from pyshaft.api import ApiClient\n\n"
+            "@pytest.fixture(scope='session')\n"
+            "def api():\n"
+            "    \"\"\"Global API client fixture.\"\"\"\n"
+            "    client = ApiClient()\n"
+            "    yield client\n\n"
+            "@pytest.fixture(scope='session')\n"
+            "def test_data():\n"
+            "    \"\"\"Load environment or global test data.\"\"\"\n"
+            "    return {'env': 'qa'}\n",
+            encoding="utf-8"
+        )
+        
+    # 4. Sample API test
+    sample_api = base_dir / "tests" / "api" / "test_sample_api.py"
+    if not sample_api.exists():
+        sample_api.write_text(
+            "import pytest\n"
+            "from pyshaft.api import ApiClient\n\n"
+            "@pytest.mark.pyshaft_api\n"
+            "def test_get_users(api: ApiClient):\n"
+            "    api.request().get('https://jsonplaceholder.typicode.com/users').assert_status(200)\n",
+            encoding="utf-8"
+        )
+        
+    # 5. Sample Web test
+    sample_web = base_dir / "tests" / "web" / "test_sample_web.py"
+    if not sample_web.exists():
+        sample_web.write_text(
+            "import pytest\n"
+            "from pyshaft import web as w\n\n"
+            "@pytest.mark.pyshaft_web\n"
+            "def test_search():\n"
+            "    w.open_url('https://example.com')\n"
+            "    w.assert_title('Example Domain')\n",
+            encoding="utf-8"
+        )
+
+    print("Project initialized successfully!")
+    print("   Run `pytest` to execute sample tests.")
+    print("   Run `pyshaft inspectapi` to build API tests.")
+    print("   Run `pyshaft inspect` to build Web tests.")
+
+
 if __name__ == "__main__":
     main()
-

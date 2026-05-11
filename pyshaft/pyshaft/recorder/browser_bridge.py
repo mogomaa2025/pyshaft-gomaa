@@ -139,6 +139,38 @@ class BrowserBridge:
     def is_running(self) -> bool:
         return self._process is not None and self._process.poll() is None
 
+    def get_cookies(self) -> list[dict]:
+        """Get all browser cookies synchronously."""
+        if not self._ws:
+            return []
+        
+        import threading
+        result_holder = {"cookies": None, "event": threading.Event()}
+        
+        def handler(msg):
+            if msg.get("id") == self._pending_cookie_id:
+                result_holder["cookies"] = msg.get("result", {}).get("cookies", [])
+                result_holder["event"].set()
+        
+        # Register temporary handler
+        old_handler = self._on_event
+        self._on_event = handler
+        
+        # Send request
+        self._msg_id += 1
+        self._pending_cookie_id = self._msg_id
+        msg = {"id": self._msg_id, "method": "Network.getAllCookies"}
+        
+        try:
+            self._ws.send(json.dumps(msg))
+            result_holder["event"].wait(timeout=3)
+        except Exception:
+            pass
+        finally:
+            self._on_event = old_handler
+        
+        return result_holder["cookies"] or []
+
     # -------------------------------------------------------------------------
     # CDP Connection
     # -------------------------------------------------------------------------

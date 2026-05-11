@@ -7,7 +7,6 @@ Registered as a pytest plugin via ``pyproject.toml`` entry point:
 
 from __future__ import annotations
 
-from sys import exception
 import logging
 
 import pytest
@@ -45,32 +44,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "pyshaft_scope(scope): Override browser session scope for a test "
         "(session/module/function)",
-    )
-
-    # Test categorization markers
-    config.addinivalue_line(
-        "markers",
-        "smoke: Quick smoke tests to verify basic functionality",
-    )
-    config.addinivalue_line(
-        "markers",
-        "regression: Full regression test suite",
-    )
-    config.addinivalue_line(
-        "markers",
-        "api: API test (no browser needed)",
-    )
-    config.addinivalue_line(
-        "markers",
-        "web: Web UI test (requires browser)",
-    )
-    config.addinivalue_line(
-        "markers",
-        "slow: Tests that take longer to run",
-    )
-    config.addinivalue_line(
-        "markers",
-        "integration: Integration tests spanning multiple services",
     )
 
     # Load pyshaft config at plugin init
@@ -299,32 +272,12 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     from pathlib import Path
 
     report_dir = Path(config.report.output_dir)
-    report_dir.mkdir(exist_ok=True, parents=True)
     report_data = _collector.get_report_data()
-    has_failures = exitstatus != 0
 
     if report_data.tests:
         try:
             export_json(report_data, report_dir / "data.json")
             export_junit_xml(report_data, report_dir / "report.xml")
-            
-            # Generate HTML report
-            try:
-                from pyshaft.report.html_renderer import render_html
-                html_path = render_html(report_data, report_dir)
-                logger.info(f"HTML report generated: {html_path}")
-                
-                # Open report on failure if configured
-                if config.report.open_on_fail and has_failures:
-                    try:
-                        import webbrowser
-                        webbrowser.open(f"file://{html_path.absolute()}")
-                        logger.info(f"Opened report: {html_path}")
-                    except Exception as e:
-                        logger.warning(f"Failed to open report: {e}")
-            except Exception as e:
-                logger.warning(f"Failed to generate HTML report: {e}")
-            
             logger.info("Reports exported to %s", report_dir)
         except Exception as e:
             logger.warning("Failed to export reports: %s", e)

@@ -39,8 +39,6 @@ class AssertionType(StrEnum):
     HEADER_EQUALS = "header_equals"
     RESPONSE_TIME_LT = "response_time_lt"
     JSON_SCHEMA = "json_schema"
-    DEEP_EQUALS = "deep_equals"
-    DEEP_CONTAINS = "deep_contains"
 
 
 class PipelineOp(StrEnum):
@@ -162,6 +160,38 @@ class ApiWorkflow:
     # Global state
     global_headers: dict[str, str] = field(default_factory=dict)
     use_session: bool = True  # Whether to share cookies across steps
+    
+    # Input/Output for workflow chaining
+    input_variables: list[str] = field(default_factory=list)  # Variables expected as input
+    output_variables: list[str] = field(default_factory=list)  # Variables to export after run
+    
+    def export_as_json(self) -> dict:
+        """Export workflow data for test chaining."""
+        return {
+            "name": self.name,
+            "base_url": self.base_url,
+            "variables": self.variables,
+            "environments": [
+                {"name": e.name, "variables": e.variables} for e in self.environments
+            ],
+            "output_variables": self.output_variables,
+            "steps": [
+                {
+                    "name": s.name,
+                    "method": s.method,
+                    "url": s.url,
+                    "last_response": s.last_response,
+                }
+                for s in self.all_steps if s.last_response
+            ]
+        }
+    
+    def import_from_json(self, data: dict) -> None:
+        """Import workflow data from external source."""
+        if "variables" in data:
+            self.variables.update(data["variables"])
+        if "output_variables" in data:
+            self.output_variables.extend(data["output_variables"])
 
     @property
     def all_steps(self) -> list[ApiRequestStep]:
